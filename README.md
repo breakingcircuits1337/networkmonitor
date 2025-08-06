@@ -72,6 +72,13 @@ docker-compose up --build
 - The `dpi_event_forwarder` service tails Zeek's JSON logs and publishes each event to the Kafka topic `dpi.events`.
 - This enables real-time application-layer visibility and session analytics for the platform.
 
+## Live Geo Heatmap & World Map
+
+- The stack includes a **GeoIP enrichment micro-service** that consumes network flow events, adds country and lat/lon, republishes to Kafka, and exposes a real-time SSE stream for browsers.
+- The **UI** (React + Leaflet) displays live heatmap and marker visualizations of flow sources on a world map.
+- Access the UI at [http://localhost:8080](http://localhost:8080).
+- **GeoIP database required**: Download [GeoLite2-City.mmdb](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data?lang=en) (free with registration) and place it in the repo root before starting the stack.
+
 **Environment Variables:**  
 - See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, `sensors/traffic_analysis/traffic_analysis.py`, `sensors/encrypted_traffic_analysis/encrypted_traffic_analysis.py`, and `sensors/ids_alert_forwarder/ids_alert_forwarder.py` for configurable parameters.
 

@@ -170,6 +170,27 @@ zeek:
       - kafka
       - zeek
 
+geoip_enricher:
+    build: ./services/geoip_enricher
+    container_name: geoip_enricher
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      IN_TOPIC: "netflow"
+      OUT_TOPIC: "geo.flows"
+      HTTP_PORT: 5000
+    volumes:
+      - ./GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
+    depends_on:
+      - kafka
+
+  ui:
+    build: ./ui
+    container_name: ui
+    ports:
+      - "8080:80"
+    depends_on:
+      - geoip_enricher
+
 volumes:
   neo4j_data:
   suricata_logs:
