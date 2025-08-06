@@ -45,9 +45,10 @@ docker-compose up --build
 - Kafka broker is available at `localhost:9092`
 - Asset discovery logs will appear in the compose output
 - Topology Updater service will automatically consume asset records and update the Neo4j graph in real time
+- Traffic Analysis sensor (host-mode container) sniffs interface traffic, summarizes flows, and publishes to Kafka topic `netflow` every 30 seconds
 
 **Environment Variables:**  
-- See `sensors/asset_discovery/asset_discovery.py` and `services/topology_updater/topology_updater.py` for configurable parameters.
+- See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, and `sensors/traffic_analysis/traffic_analysis.py` for configurable parameters.
 
 **Note:**  
 No real secrets or credentials are stored in this repository.  

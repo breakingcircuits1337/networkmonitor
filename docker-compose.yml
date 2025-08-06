@@ -62,5 +62,17 @@ services:
       - kafka
       - neo4j
 
+  traffic_analysis:
+    build: ./sensors/traffic_analysis
+    container_name: traffic_analysis
+    environment:
+      INTERFACE: "eth0"
+      FLOW_WINDOW_SECONDS: 30
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "netflow"
+    depends_on:
+      - kafka
+    network_mode: "host"
+
 volumes:
   neo4j_data:
