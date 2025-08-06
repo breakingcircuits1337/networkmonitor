@@ -63,6 +63,10 @@ docker-compose up --build
   ```
 - See `stream_aggregation/init.sql` for the correlation logic.
 
+**Alert Sink Neo4j Integration:**
+- The `alert_sink_neo4j` service consumes correlated alerts from Kafka and writes them to Neo4j, creating relationships from source asset to alert (and to target asset if present).
+- This enables security analysts to query and visualize incidents, attack paths, and asset-alert relationships directly in Neo4j.
+
 **Environment Variables:**  
 - See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, `sensors/traffic_analysis/traffic_analysis.py`, `sensors/encrypted_traffic_analysis/encrypted_traffic_analysis.py`, and `sensors/ids_alert_forwarder/ids_alert_forwarder.py` for configurable parameters.
 
