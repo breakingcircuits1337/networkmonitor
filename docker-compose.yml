@@ -212,6 +212,22 @@ soar_blocker:
     depends_on:
       - kafka
 
+packet_launcher:
+    build: ./services/packet_launcher
+    container_name: packet_launcher
+    network_mode: "host"
+    environment:
+      ENABLE_PACKET_LAUNCHER: "${ENABLE_PACKET_LAUNCHER:-false}"
+      LAUNCH_TOKEN: "${LAUNCH_TOKEN:-}"
+      KAFKA_BOOTSTRAP: "kafka:9092"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    ports:
+      - "7000:7000"
+    depends_on:
+      - kafka
+
 volumes:
   neo4j_data:
   suricata_logs:

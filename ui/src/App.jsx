@@ -354,9 +354,80 @@ export default function App() {
                 ⟳ Reset Map
               </button>
             </div>
+            {/* Active Defence / Packet Launcher */}
+            <div style={{marginTop:18, background: darkMode ? "#191a1e" : "#f6f7fa", border: "1px solid #ddd", borderRadius: 8, padding: 11}}>
+              <div style={{fontWeight:600, fontSize:15, marginBottom:3, color:darkMode?"#ffea00":"#222"}}>Active Defence (Manual Packet Launcher)</div>
+              <div style={{fontSize:13, marginBottom:7, color:"#a00"}}>
+                <b>Use with caution! For test/lab environments only.</b>
+                <br/>This feature transmits crafted packets to an IP. Ensure you have legal authorisation.
+              </div>
+              <PacketLauncherForm darkMode={darkMode} />
+            </div>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// --- PacketLauncherForm component ---
+function PacketLauncherForm({ darkMode }) {
+  const [ip, setIp] = useState("");
+  const [protocol, setProtocol] = useState("ICMP");
+  const [size, setSize] = useState(64);
+  const [rate, setRate] = useState(1);
+  const [count, setCount] = useState(1);
+  const [result, setResult] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleLaunch(e) {
+    e.preventDefault();
+    setResult("");
+    setLoading(true);
+    try {
+      const res = await fetch("http://localhost:7000/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip, protocol, size: Number(size), rate: Number(rate), count: Number(count) })
+      });
+      const data = await res.json();
+      if (res.ok) setResult(data.detail || "Packet launch triggered.");
+      else setResult(data.error || "Error");
+    } catch (err) {
+      setResult("Network or server error.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleLaunch} style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{display:"flex", gap:6}}>
+        <input type="text" value={ip} onChange={e=>setIp(e.target.value)} placeholder="Target IP" required style={{flex:1}} />
+        <select value={protocol} onChange={e=>setProtocol(e.target.value)} style={{width:97}}>
+          <option>ICMP</option>
+          <option>TCP</option>
+          <option>UDP</option>
+        </select>
+      </div>
+      <div style={{display:"flex", gap:6}}>
+        <input type="number" min={1} max={1500} value={size} onChange={e=>setSize(e.target.value)} placeholder="Size" style={{width:90}} />
+        <input type="number" min={1} max={100} value={rate} onChange={e=>setRate(e.target.value)} placeholder="Rate" style={{width:90}} />
+        <input type="number" min={1} max={1000} value={count} onChange={e=>setCount(e.target.value)} placeholder="Count" style={{width:90}} />
+      </div>
+      <button type="submit" disabled={loading} style={{
+        background: darkMode ? "#232426" : "#34c9eb",
+        color: darkMode ? "#ffea00" : "#fff",
+        fontWeight: 600,
+        border: "none",
+        borderRadius: 6,
+        padding: "6px 0",
+        cursor: loading ? "wait" : "pointer",
+        marginTop: 4
+      }}>
+        {loading ? "Launching..." : "Launch"}
+      </button>
+      {result && <div style={{fontSize:13, marginTop:4, color: result.includes("error") ? "#a00" : "#080"}}>{result}</div>}
+    </form>
   );
 }

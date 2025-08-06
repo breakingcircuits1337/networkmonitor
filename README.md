@@ -57,6 +57,12 @@ docker-compose up --build
 - Automatically executes a blocklist command (e.g., iptables or API call) for malicious source IPs, and logs the action.  
 - Configure thresholds and the command via environment variables.
 
+**Active Defence / Packet Launcher**:
+- The `packet_launcher` micro-service exposes a REST endpoint and UI form (in the sidebar) for manual, on-demand packet transmission.
+- Users can specify target IP, protocol (ICMP/TCP/UDP), packet size, rate, and count; the backend crafts and transmits packets with Scapy.
+- **Legal disclaimer:** This feature is opt-in and requires explicit enablement (`ENABLE_PACKET_LAUNCHER=true`). It must **not** be used without appropriate authorisation and should be restricted to lab/test environments.
+- All launches are logged; audit events can be sent to Kafka.
+
 **Viewing Suricata Alerts in Neo4j:**
 - Future feature: Security alerts from `security.alerts` topic will be correlated with asset and flow data in Neo4j, enabling rich threat hunting and investigation workflows. (Work in progress.)
 
