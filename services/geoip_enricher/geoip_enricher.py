@@ -55,8 +55,10 @@ def events():
 def kafka_consumer_thread():
     kafka_bootstrap = get_env("KAFKA_BOOTSTRAP", "kafka:9092")
     in_topic = get_env("IN_TOPIC", "netflow")
-    out_topic = get_env("OUT_TOPIC", "geo.flows")
+    out_topic = get_env("OUT_TOPIC", "geo.events")
     geoip_db = get_env("GEOIP_DB", "/geoip/GeoLite2-City.mmdb")
+    extra = get_env("EXTRA_TOPICS", "security.alerts,dpi.events")
+    topics = [in_topic] + [t.strip() for t in extra.split(",") if t.strip()]
 
     group_id = "geoip-enricher"
     log_interval = 500
@@ -68,7 +70,7 @@ def kafka_consumer_thread():
         retries=5
     )
     consumer = KafkaConsumer(
-        in_topic,
+        *topics,
         bootstrap_servers=kafka_bootstrap,
         group_id=group_id,
         auto_offset_reset='earliest',
@@ -88,35 +90,69 @@ def kafka_consumer_thread():
         while not shutdown_event.is_set():
             for msg in consumer:
                 ev = msg.value
-                src_ip = ev.get("src_ip")
-                dst_ip = ev.get("dst_ip")
-                bytes_ = ev.get("bytes")
-                timestamp = ev.get("first_seen") or ev.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                country, lat, lon = geoip_lookup(src_ip, reader)
+                topic = msg.topic
+                event_type = "flow" if topic == in_topic else ("ids_alert" if topic == "security.alerts" else "dpi_event")
+
+                src_ip = None
+                dst_ip = None
+                bytes_ = 0
+                timestamp = None
+                geo_event = {
+                    "event_type": event_type
+                }
+                if event_type == "flow":
+                    src_ip = ev.get("src_ip")
+                    dst_ip = ev.get("dst_ip")
+                    bytes_ = ev.get("bytes", 0)
+                    timestamp = ev.get("first_seen") or ev.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                elif event_type == "ids_alert":
+                    src_ip = ev.get("src_ip")
+                    dst_ip = ev.get("dest_ip")
+                    bytes_ = 0
+                    timestamp = ev.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    if "signature" in ev:
+                        geo_event["signature"] = ev.get("signature")
+                    if "category" in ev:
+                        geo_event["category"] = ev.get("category")
+                    if "severity" in ev:
+                        geo_event["severity"] = ev.get("severity")
+                elif event_type == "dpi_event":
+                    # Zeek conn.log style
+                    if "id" in ev and isinstance(ev["id"], dict):
+                        src_ip = ev["id"].get("orig_h")
+                        dst_ip = ev["id"].get("resp_h")
+                        bytes_ = ev.get("resp_bytes") or ev.get("orig_bytes") or 0
+                        timestamp = ev.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        geo_event["protocol"] = ev.get("proto")
+                    else:
+                        continue  # skip non-connlog events
+
+                geo_event.update({
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "bytes": bytes_,
+                    "timestamp": timestamp
+                })
+
+                country, lat, lon = geoip_lookup(src_ip, reader) if src_ip else (None, None, None)
+                geo_event["country"] = country
+                geo_event["lat"] = lat
+                geo_event["lon"] = lon
+
+                # Only produce/send if lat/lon present
                 if lat is not None and lon is not None:
-                    geo_event = {
-                        "src_ip": src_ip,
-                        "dst_ip": dst_ip,
-                        "bytes": bytes_,
-                        "country": country,
-                        "lat": lat,
-                        "lon": lon,
-                        "timestamp": timestamp
-                    }
-                    # Produce to Kafka
                     producer.send(out_topic, geo_event)
                     # SSE - push to buffer and queue
                     event_buffer.append(geo_event)
                     if len(event_buffer) > buffer_max:
                         event_buffer = event_buffer[-buffer_max:]
-                    # Non-blocking put (drop if queue full)
                     try:
                         event_queue.put_nowait(geo_event)
                     except queue.Full:
                         pass
                     msg_count += 1
                     if msg_count % log_interval == 0:
-                        logger.info(f"GeoIP-enriched {msg_count} flow events")
+                        logger.info(f"GeoIP-enriched {msg_count} events (flows/alerts/DPI)")
                 if shutdown_event.is_set():
                     break
     except Exception as e:

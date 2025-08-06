@@ -74,8 +74,8 @@ docker-compose up --build
 
 ## Live Geo Heatmap & World Map
 
-- The stack includes a **GeoIP enrichment micro-service** that consumes network flow events, adds country and lat/lon, republishes to Kafka, and exposes a real-time SSE stream for browsers.
-- The **UI** (React + Leaflet) displays live heatmap and marker visualizations of flow sources on a world map.
+- The stack includes a **GeoIP enrichment micro-service** that consumes network flow events, IDS alerts, and DPI events, adds country and lat/lon, republishes to Kafka topic `geo.events`, and exposes a real-time SSE stream for browsers.
+- The **UI** (React + Leaflet) displays live heatmap (flows) and colored markers for IDS alerts (red) and DPI/session events (purple) on a world map, with info popups and a legend.
 - Access the UI at [http://localhost:8080](http://localhost:8080).
 - **GeoIP database required**: Download [GeoLite2-City.mmdb](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data?lang=en) (free with registration) and place it in the repo root before starting the stack.
 

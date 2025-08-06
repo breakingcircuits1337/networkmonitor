@@ -176,7 +176,8 @@ geoip_enricher:
     environment:
       KAFKA_BOOTSTRAP: "kafka:9092"
       IN_TOPIC: "netflow"
-      OUT_TOPIC: "geo.flows"
+      OUT_TOPIC: "geo.events"
+      EXTRA_TOPICS: "security.alerts,dpi.events"
       HTTP_PORT: 5000
     volumes:
       - ./GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
