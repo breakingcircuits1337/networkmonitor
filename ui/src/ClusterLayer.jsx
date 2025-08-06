@@ -3,15 +3,16 @@ import { useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet.markercluster";
 
-function makeBlueIcon() {
+function makeClusterIcon(darkMode) {
+  const color = darkMode ? '#ffea00' : '#34c9eb';
   return L.divIcon({
-    html: '<div style="background:#34c9eb;width:10px;height:10px;border-radius:50%;border:2px solid white;"></div>',
+    html: `<div style="background:${color};width:10px;height:10px;border-radius:50%;border:2px solid white;"></div>`,
     className: "",
     iconSize: [14, 14]
   });
 }
 
-export default function ClusterLayer({ points, show }) {
+export default function ClusterLayer({ points, show, darkMode }) {
   const map = useMap();
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export default function ClusterLayer({ points, show }) {
     points.forEach((p) => {
       if (p.lat && p.lon) {
         const marker = L.marker([p.lat, p.lon], {
-          icon: makeBlueIcon(),
+          icon: makeClusterIcon(darkMode),
           keyboard: false,
           interactive: false
         });
@@ -37,7 +38,7 @@ export default function ClusterLayer({ points, show }) {
         map._flowClusterLayer = null;
       }
     };
-  }, [map, points, show]);
+  }, [map, points, show, darkMode]);
 
   return null;
 }

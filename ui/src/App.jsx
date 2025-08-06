@@ -4,6 +4,8 @@ import "leaflet/dist/leaflet.css";
 import HeatMapLayer from "./HeatMapLayer.jsx";
 import ChoroplethLayer from "./ChoroplethLayer.jsx";
 import ClusterLayer from "./ClusterLayer.jsx";
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import React, { useEffect, useRef, useState } from "react";
 
 const EVENT_URL = "http://geoip_enricher:5000/events";
 const MAX_FLOWS = 2000, MAX_ALERTS = 500, MIN_WINDOW = 10, MAX_WINDOW = 600, DEFAULT_WINDOW = 60;
@@ -41,6 +43,25 @@ export default function App() {
   const [timelinePos, setTimelinePos] = useState(nowSec());
   const [play, setPlay] = useState(false);
 
+  // UI/UX
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const mapRef = useRef();
+
+  // Responsive mode
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 600);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 600);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Add/remove dark class to body
+  useEffect(() => {
+    if (darkMode) document.body.classList.add("dark");
+    else document.body.classList.remove("dark");
+  }, [darkMode]);
+
   // Buffer updates and timelinePos logic
   useEffect(() => {
     const ev = new window.EventSource(EVENT_URL);
@@ -69,7 +90,6 @@ export default function App() {
             return next.length > MAX_ALERTS ? next.slice(next.length - MAX_ALERTS) : next;
           });
         }
-        // Whenever new data comes in, advance timelinePos if live or if new max
         setTimelinePos((curr) => {
           const allTs = [
             ...flows, ...idsAlerts, ...dpiEvents,
@@ -130,8 +150,16 @@ export default function App() {
         center={[20, 0]}
         zoom={2}
         scrollWheelZoom={true}
-        style={{ height: "100%", width: "100%" }}
+        style={{
+          height: "100%",
+          width: "100%",
+          transition: "margin-left 0.33s",
+          marginLeft: !isMobile && sidebarOpen ? 270 : 0,
+          filter: sidebarOpen ? "brightness(0.98)" : undefined,
+          opacity: sidebarOpen && !isMobile ? 0.95 : 1
+        }}
         preferCanvas={true}
+        ref={mapRef}
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -139,7 +167,7 @@ export default function App() {
         />
         <ChoroplethLayer countryCounts={countryCounts} />
         {showFlows && <HeatMapLayer points={filteredFlows} />}
-        <ClusterLayer points={filteredFlows} show={showFlows} />
+        <ClusterLayer points={filteredFlows} show={showFlows} darkMode={darkMode} />
         {/* IDS Alerts - red circle */}
         {showIds && filteredIds.map((p, idx) =>
           p.lat && p.lon ? (
@@ -191,76 +219,143 @@ export default function App() {
           ) : null
         )}
       </MapContainer>
-      {/* Controls overlay */}
-      <div style={{
-        position: "absolute", top: 10, left: 10, background: "rgba(255,255,255,0.97)", padding: "14px 18px",
-        borderRadius: 10, minWidth: 340, boxShadow: "0 1px 6px #9992"
-      }}>
-        <h3 style={{ margin: 0, marginBottom: 6 }}>Network Geo Heatmap</h3>
-        <div style={{marginBottom:10, fontSize:15}}>
-          <label>
-            <input type="checkbox" checked={showFlows} onChange={e => setShowFlows(e.target.checked)} />{" "}
-            <span style={{ color: "#34c9eb" }}>●</span> Flows
-          </label>{" "}
-          <label>
-            <input type="checkbox" checked={showIds} onChange={e => setShowIds(e.target.checked)} />{" "}
-            <span style={{ color: "#e53935" }}>●</span> IDS Alerts
-          </label>{" "}
-          <label>
-            <input type="checkbox" checked={showDpi} onChange={e => setShowDpi(e.target.checked)} />{" "}
-            <span style={{ color: "#7c51a1" }}>●</span> DPI Events
-          </label>
-        </div>
-        <div style={{marginBottom:10, display:"flex", alignItems: "center"}}>
+      {/* Sidebar / Controls */}
+      <div
+        className={`sidebar${sidebarOpen ? " open" : ""}${darkMode ? " dark" : ""}${isMobile ? " mobile" : ""}`}
+        style={{
+          transition: "all 0.33s cubic-bezier(.4,1.2,.6,1)",
+          ...(sidebarOpen
+            ? (isMobile
+                ? { left: 0, top: 0, width: "100vw", height: 240, borderRadius: "0 0 18px 18px" }
+                : { left: 0, top: 0, width: 270, height: "100vh", borderRadius: "0 18px 18px 0" })
+            : (isMobile
+                ? { left: 0, top: 0, width: "100vw", height: 44 }
+                : { left: 0, top: 0, width: 54, height: 54, borderRadius: "0 0 18px 0" })
+          )
+        }}
+      >
+        {!sidebarOpen ? (
           <button
-            style={{
-              marginRight: 12, fontWeight: 600,
-              background: play ? "#eee" : "#fff",
-              border: "1px solid #aaa", borderRadius: 6, minWidth: 40, height: 34, cursor: "pointer"
-            }}
-            onClick={() => setPlay(pl => !pl)}
-            title={play ? "Pause" : "Play"}
+            className="sidebar-btn"
+            style={{ margin: 6, fontSize: 28, background: "none", border: "none", cursor: "pointer", color: darkMode ? "#eee" : "#222" }}
+            onClick={() => setSidebarOpen(true)}
+            title="Open controls"
           >
-            {play ? "⏸️" : "▶️"}
+            ☰
           </button>
-          <input
-            type="range"
-            min={minTs}
-            max={maxTs}
-            value={timelinePos}
-            onChange={e => {
-              setPlay(false);
-              setTimelinePos(Number(e.target.value));
-            }}
-            style={{ flex: 1, marginRight: 10 }}
-          />
-          <span style={{ fontFamily: "monospace", fontSize: 13, minWidth: 120 }}>
-            {fmtTime(timelinePos)}
-          </span>
-        </div>
-        <div style={{marginBottom:10, fontSize:14}}>
-          <label>
-            Window:{" "}
-            <input
-              type="number"
-              min={MIN_WINDOW}
-              max={MAX_WINDOW}
-              value={windowSec}
-              onChange={e => setWindowSec(Number(e.target.value))}
-              style={{ width: 60, marginRight: 6 }}
-            />
-            seconds
-          </label>
-        </div>
-        <div style={{fontSize:13, color: "#222"}}>
-          {showFlows && <span><span style={{ color: "#34c9eb" }}>●</span> Flows ({filteredFlows.length})&nbsp;&nbsp;</span>}
-          {showIds && <span><span style={{ color: "#e53935" }}>●</span> IDS Alerts ({filteredIds.length})&nbsp;&nbsp;</span>}
-          {showDpi && <span><span style={{ color: "#7c51a1" }}>●</span> DPI Events ({filteredDpi.length})</span>}
-        </div>
-        <div style={{marginTop:4, fontSize:12}}>
-          Blue = flow (clusters show flow counts), Red = IDS alert, Purple = DPI event.<br />
-          Timeline window controls event visibility by time.
-        </div>
+        ) : (
+          <div style={{ padding: isMobile ? "12px 18px 6px 18px" : "16px 18px 6px 18px" }}>
+            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+              <h3 style={{ margin: 0, fontWeight: 600 }}>Network Geo Heatmap</h3>
+              <button
+                className="sidebar-btn"
+                style={{ fontSize: 24, background: "none", border: "none", cursor: "pointer", color: darkMode ? "#eee" : "#222", marginLeft: 10 }}
+                onClick={() => setSidebarOpen(false)}
+                title="Close controls"
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{marginTop:8, marginBottom:10, fontSize:15, display:"flex", flexWrap:"wrap", gap:8}}>
+              <label>
+                <input type="checkbox" checked={showFlows} onChange={e => setShowFlows(e.target.checked)} />{" "}
+                <span style={{ color: darkMode ? "#ffea00" : "#34c9eb" }}>●</span> Flows
+              </label>
+              <label>
+                <input type="checkbox" checked={showIds} onChange={e => setShowIds(e.target.checked)} />{" "}
+                <span style={{ color: "#e53935" }}>●</span> IDS Alerts
+              </label>
+              <label>
+                <input type="checkbox" checked={showDpi} onChange={e => setShowDpi(e.target.checked)} />{" "}
+                <span style={{ color: "#7c51a1" }}>●</span> DPI Events
+              </label>
+            </div>
+            <div style={{marginBottom:10, display:"flex", alignItems: "center"}}>
+              <button
+                style={{
+                  marginRight: 10, fontWeight: 600,
+                  background: play ? "#eee" : "#fff",
+                  border: "1px solid #aaa", borderRadius: 6, minWidth: 34, height: 34, cursor: "pointer"
+                }}
+                onClick={() => setPlay(pl => !pl)}
+                title={play ? "Pause" : "Play"}
+              >
+                {play ? "⏸️" : "▶️"}
+              </button>
+              <input
+                type="range"
+                min={minTs}
+                max={maxTs}
+                value={timelinePos}
+                onChange={e => {
+                  setPlay(false);
+                  setTimelinePos(Number(e.target.value));
+                }}
+                style={{ flex: 1, marginRight: 10 }}
+              />
+              <span style={{ fontFamily: "monospace", fontSize: 13, minWidth: 120 }}>
+                {fmtTime(timelinePos)}
+              </span>
+            </div>
+            <div style={{marginBottom:10, fontSize:14}}>
+              <label>
+                Window:{" "}
+                <input
+                  type="number"
+                  min={MIN_WINDOW}
+                  max={MAX_WINDOW}
+                  value={windowSec}
+                  onChange={e => setWindowSec(Number(e.target.value))}
+                  style={{ width: 60, marginRight: 6 }}
+                />
+                seconds
+              </label>
+            </div>
+            <div style={{fontSize:13, color: darkMode ? "#eee" : "#222"}}>
+              {showFlows && <span><span style={{ color: darkMode ? "#ffea00" : "#34c9eb" }}>●</span> Flows ({filteredFlows.length})&nbsp;&nbsp;</span>}
+              {showIds && <span><span style={{ color: "#e53935" }}>●</span> IDS Alerts ({filteredIds.length})&nbsp;&nbsp;</span>}
+              {showDpi && <span><span style={{ color: "#7c51a1" }}>●</span> DPI Events ({filteredDpi.length})</span>}
+            </div>
+            <div style={{marginTop:4, fontSize:12, color: darkMode ? "#ccc" : "#333"}}>
+              <span style={{ color: darkMode ? "#ffea00" : "#34c9eb" }}>●</span> = flow (clusters show flow counts), <span style={{ color: "#e53935" }}>●</span> IDS alert, <span style={{ color: "#7c51a1" }}>●</span> DPI event.<br />
+              Timeline window controls event visibility by time.
+            </div>
+            <div style={{marginTop:10, display: "flex", alignItems: "center", gap: 10}}>
+              <button
+                className="sidebar-btn"
+                style={{
+                  fontWeight: 600, borderRadius: 6, border: "1px solid #aaa",
+                  background: darkMode ? "#252525" : "#f7f7f7",
+                  color: darkMode ? "#ffea00" : "#333",
+                  padding: "5px 12px", fontSize: 15, cursor: "pointer"
+                }}
+                onClick={() => setDarkMode(dm => !dm)}
+                title="Toggle dark/light mode"
+              >
+                {darkMode ? "🌙" : "☀️"} {darkMode ? "Dark" : "Light"}
+              </button>
+              <button
+                className="sidebar-btn"
+                style={{
+                  fontWeight: 600, borderRadius: 6, border: "1px solid #aaa",
+                  background: darkMode ? "#252525" : "#f7f7f7",
+                  color: darkMode ? "#ffea00" : "#333",
+                  padding: "5px 12px", fontSize: 15, cursor: "pointer"
+                }}
+                onClick={() => {
+                  if (mapRef.current) {
+                    const map = mapRef.current;
+                    if (map.flyTo) map.flyTo([20, 0], 2, { animate: true, duration: 1.1 });
+                    else if (map._leaflet_map) map._leaflet_map.flyTo([20, 0], 2, { animate: true, duration: 1.1 });
+                  }
+                }}
+                title="Reset map view"
+              >
+                ⟳ Reset Map
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
