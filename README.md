@@ -46,9 +46,15 @@ docker-compose up --build
 - Asset discovery logs will appear in the compose output
 - Topology Updater service will automatically consume asset records and update the Neo4j graph in real time
 - Traffic Analysis sensor (host-mode container) sniffs interface traffic, summarizes flows, and publishes to Kafka topic `netflow` every 30 seconds
+- **Encrypted Traffic Analysis Sensor**: (host-mode container) monitors TLS handshakes, extracts JA3/JA3S/SNI/fingerprint metadata, and publishes to Kafka topic `tls.meta`.
+- **Suricata IDS/IPS**: Monitors all traffic for known threats, outputs alerts to `eve.json`.
+- **IDS Alert Forwarder**: Reads Suricata EVE alerts and forwards them to Kafka topic `security.alerts`.
+
+**Viewing Suricata Alerts in Neo4j:**
+- Future feature: Security alerts from `security.alerts` topic will be correlated with asset and flow data in Neo4j, enabling rich threat hunting and investigation workflows. (Work in progress.)
 
 **Environment Variables:**  
-- See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, and `sensors/traffic_analysis/traffic_analysis.py` for configurable parameters.
+- See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, `sensors/traffic_analysis/traffic_analysis.py`, `sensors/encrypted_traffic_analysis/encrypted_traffic_analysis.py`, and `sensors/ids_alert_forwarder/ids_alert_forwarder.py` for configurable parameters.
 
 **Note:**  
 No real secrets or credentials are stored in this repository.  

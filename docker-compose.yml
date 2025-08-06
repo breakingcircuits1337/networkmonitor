@@ -74,5 +74,38 @@ services:
       - kafka
     network_mode: "host"
 
+  encrypted_traffic_analysis:
+    build: ./sensors/encrypted_traffic_analysis
+    container_name: encrypted_traffic_analysis
+    environment:
+      INTERFACE: "eth0"
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "tls.meta"
+    depends_on:
+      - kafka
+    network_mode: "host"
+
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: suricata
+    network_mode: "host"
+    volumes:
+      - suricata_logs:/var/log/suricata
+    command: ["-i", "eth0"]
+
+  ids_alert_forwarder:
+    build: ./sensors/ids_alert_forwarder
+    container_name: ids_alert_forwarder
+    environment:
+      EVE_FILE: "/var/log/suricata/eve.json"
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "security.alerts"
+    volumes:
+      - suricata_logs:/var/log/suricata:ro
+    depends_on:
+      - kafka
+      - suricata
+
 volumes:
   neo4j_data:
+  suricata_logs:
