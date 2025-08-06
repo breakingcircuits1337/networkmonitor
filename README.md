@@ -53,6 +53,16 @@ docker-compose up --build
 **Viewing Suricata Alerts in Neo4j:**
 - Future feature: Security alerts from `security.alerts` topic will be correlated with asset and flow data in Neo4j, enabling rich threat hunting and investigation workflows. (Work in progress.)
 
+**Stream Aggregation & Alert Correlation (ksqlDB):**
+- The stack includes [ksqlDB](https://ksqldb.io/) for real-time stream processing and enrichment.
+- Asset discovery and security alerts are joined in ksqlDB to produce a `correlated_alerts` stream (Kafka topic `alert.correlated`).
+- You can interactively query ksqlDB at [http://localhost:8088](http://localhost:8088) or with `docker exec -it ksqldb-cli ksql http://ksqldb-server:8088`.
+- To see joined alerts:
+  ```sql
+  SELECT * FROM correlated_alerts EMIT CHANGES;
+  ```
+- See `stream_aggregation/init.sql` for the correlation logic.
+
 **Environment Variables:**  
 - See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, `sensors/traffic_analysis/traffic_analysis.py`, `sensors/encrypted_traffic_analysis/encrypted_traffic_analysis.py`, and `sensors/ids_alert_forwarder/ids_alert_forwarder.py` for configurable parameters.
 
