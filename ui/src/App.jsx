@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import HeatMapLayer from "./HeatMapLayer.jsx";
 import ChoroplethLayer from "./ChoroplethLayer.jsx";
+import ClusterLayer from "./ClusterLayer.jsx";
 
 const EVENT_URL = "http://geoip_enricher:5000/events";
 const MAX_FLOWS = 2000, MAX_ALERTS = 500, MIN_RETENTION = 30, MAX_RETENTION = 600;
@@ -95,29 +96,7 @@ export default function App() {
         />
         <ChoroplethLayer countryCounts={countryCounts} />
         {showFlows && <HeatMapLayer points={filteredFlows} />}
-        {/* Flows - blue circle */}
-        {showFlows && filteredFlows.slice(-200).map((p, idx) =>
-          p.lat && p.lon ? (
-            <CircleMarker
-              key={`flow-${idx}`}
-              center={[p.lat, p.lon]}
-              radius={4}
-              fillOpacity={0.7}
-              color="#34c9eb"
-              stroke={false}
-            >
-              <Popup>
-                <div>
-                  <b>Flow</b>
-                  <br />
-                  <span>IP: {p.src_ip}</span>
-                  <br />
-                  <a href={assetLink(p.src_ip)} target="_blank" rel="noopener noreferrer">Open in Neo4j</a>
-                </div>
-              </Popup>
-            </CircleMarker>
-          ) : null
-        )}
+        <ClusterLayer points={filteredFlows} show={showFlows} />
         {/* IDS Alerts - red circle */}
         {showIds && filteredIds.map((p, idx) =>
           p.lat && p.lon ? (
@@ -207,7 +186,7 @@ export default function App() {
           {showDpi && <span><span style={{ color: "#7c51a1" }}>●</span> DPI Events ({filteredDpi.length})</span>}
         </div>
         <div style={{marginTop:4, fontSize:12}}>
-          Blue = flow, Red = IDS alert, Purple = DPI event.<br />
+          Blue = flow (clusters show flow counts), Red = IDS alert, Purple = DPI event.<br />
           Retention controls fade-out by time (sec).
         </div>
       </div>
