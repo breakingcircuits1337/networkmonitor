@@ -6,7 +6,7 @@ import ChoroplethLayer from "./ChoroplethLayer.jsx";
 import ClusterLayer from "./ClusterLayer.jsx";
 
 const EVENT_URL = "http://geoip_enricher:5000/events";
-const MAX_FLOWS = 2000, MAX_ALERTS = 500, MIN_RETENTION = 30, MAX_RETENTION = 600;
+const MAX_FLOWS = 2000, MAX_ALERTS = 500, MIN_WINDOW = 10, MAX_WINDOW = 600, DEFAULT_WINDOW = 60;
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -23,6 +23,12 @@ function parseTS(ts) {
   return 0;
 }
 
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  return d.toLocaleString();
+}
+
 export default function App() {
   // state
   const [flows, setFlows] = useState([]);
@@ -31,9 +37,11 @@ export default function App() {
   const [showFlows, setShowFlows] = useState(true);
   const [showIds, setShowIds] = useState(true);
   const [showDpi, setShowDpi] = useState(true);
-  const [retentionSec, setRetentionSec] = useState(300);
+  const [windowSec, setWindowSec] = useState(DEFAULT_WINDOW);
+  const [timelinePos, setTimelinePos] = useState(nowSec());
+  const [play, setPlay] = useState(false);
 
-  // main event handler
+  // Buffer updates and timelinePos logic
   useEffect(() => {
     const ev = new window.EventSource(EVENT_URL);
     ev.onmessage = (e) => {
@@ -61,16 +69,51 @@ export default function App() {
             return next.length > MAX_ALERTS ? next.slice(next.length - MAX_ALERTS) : next;
           });
         }
+        // Whenever new data comes in, advance timelinePos if live or if new max
+        setTimelinePos((curr) => {
+          const allTs = [
+            ...flows, ...idsAlerts, ...dpiEvents,
+            { _ts: ts }
+          ].map(f => f._ts || 0);
+          const maxTs = Math.max(...allTs, 0);
+          if (play || curr === undefined || curr < maxTs - 2) return maxTs;
+          return curr;
+        });
       } catch {}
     };
     return () => ev.close();
+    // eslint-disable-next-line
   }, []);
 
-  // Filtering by retention window
-  const cutoff = nowSec() - retentionSec;
-  const filteredFlows = flows.filter(f => f._ts >= cutoff && f.lat && f.lon);
-  const filteredIds = idsAlerts.filter(f => f._ts >= cutoff && f.lat && f.lon);
-  const filteredDpi = dpiEvents.filter(f => f._ts >= cutoff && f.lat && f.lon);
+  // Timeline min/max
+  const allTsArr = [...flows, ...idsAlerts, ...dpiEvents].map(f => f._ts || 0).filter(Boolean);
+  const minTs = allTsArr.length ? Math.min(...allTsArr) : nowSec() - 600;
+  const maxTs = allTsArr.length ? Math.max(...allTsArr) : nowSec();
+
+  // Playback effect
+  useEffect(() => {
+    if (!play) return;
+    if (timelinePos >= maxTs) {
+      setPlay(false);
+      return;
+    }
+    const t = setInterval(() => {
+      setTimelinePos((tp) => {
+        if (tp < maxTs) return tp + 1;
+        setPlay(false);
+        return tp;
+      });
+    }, 500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [play, timelinePos, maxTs]);
+
+  // Filter events by timeline window
+  const windowStart = timelinePos - windowSec;
+  const windowEnd = timelinePos;
+  const filteredFlows = flows.filter(f => f._ts >= windowStart && f._ts <= windowEnd && f.lat && f.lon);
+  const filteredIds = idsAlerts.filter(f => f._ts >= windowStart && f._ts <= windowEnd && f.lat && f.lon);
+  const filteredDpi = dpiEvents.filter(f => f._ts >= windowStart && f._ts <= windowEnd && f.lat && f.lon);
 
   // Country counts for flows (choropleth)
   const countryCounts = {};
@@ -150,11 +193,11 @@ export default function App() {
       </MapContainer>
       {/* Controls overlay */}
       <div style={{
-        position: "absolute", top: 10, left: 10, background: "rgba(255,255,255,0.95)", padding: "12px 16px",
-        borderRadius: 10, minWidth: 270, boxShadow: "0 1px 6px #9992"
+        position: "absolute", top: 10, left: 10, background: "rgba(255,255,255,0.97)", padding: "14px 18px",
+        borderRadius: 10, minWidth: 340, boxShadow: "0 1px 6px #9992"
       }}>
         <h3 style={{ margin: 0, marginBottom: 6 }}>Network Geo Heatmap</h3>
-        <div style={{marginBottom:8, fontSize:14}}>
+        <div style={{marginBottom:10, fontSize:15}}>
           <label>
             <input type="checkbox" checked={showFlows} onChange={e => setShowFlows(e.target.checked)} />{" "}
             <span style={{ color: "#34c9eb" }}>●</span> Flows
@@ -168,16 +211,45 @@ export default function App() {
             <span style={{ color: "#7c51a1" }}>●</span> DPI Events
           </label>
         </div>
-        <div style={{marginBottom:8}}>
-          <label>Retention: {retentionSec}s
+        <div style={{marginBottom:10, display:"flex", alignItems: "center"}}>
+          <button
+            style={{
+              marginRight: 12, fontWeight: 600,
+              background: play ? "#eee" : "#fff",
+              border: "1px solid #aaa", borderRadius: 6, minWidth: 40, height: 34, cursor: "pointer"
+            }}
+            onClick={() => setPlay(pl => !pl)}
+            title={play ? "Pause" : "Play"}
+          >
+            {play ? "⏸️" : "▶️"}
+          </button>
+          <input
+            type="range"
+            min={minTs}
+            max={maxTs}
+            value={timelinePos}
+            onChange={e => {
+              setPlay(false);
+              setTimelinePos(Number(e.target.value));
+            }}
+            style={{ flex: 1, marginRight: 10 }}
+          />
+          <span style={{ fontFamily: "monospace", fontSize: 13, minWidth: 120 }}>
+            {fmtTime(timelinePos)}
+          </span>
+        </div>
+        <div style={{marginBottom:10, fontSize:14}}>
+          <label>
+            Window:{" "}
             <input
-              style={{ verticalAlign: "middle", marginLeft: 8 }}
-              type="range"
-              min={MIN_RETENTION}
-              max={MAX_RETENTION}
-              value={retentionSec}
-              onChange={e => setRetentionSec(Number(e.target.value))}
+              type="number"
+              min={MIN_WINDOW}
+              max={MAX_WINDOW}
+              value={windowSec}
+              onChange={e => setWindowSec(Number(e.target.value))}
+              style={{ width: 60, marginRight: 6 }}
             />
+            seconds
           </label>
         </div>
         <div style={{fontSize:13, color: "#222"}}>
@@ -187,7 +259,7 @@ export default function App() {
         </div>
         <div style={{marginTop:4, fontSize:12}}>
           Blue = flow (clusters show flow counts), Red = IDS alert, Purple = DPI event.<br />
-          Retention controls fade-out by time (sec).
+          Timeline window controls event visibility by time.
         </div>
       </div>
     </div>
