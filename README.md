@@ -67,6 +67,11 @@ docker-compose up --build
 - The `alert_sink_neo4j` service consumes correlated alerts from Kafka and writes them to Neo4j, creating relationships from source asset to alert (and to target asset if present).
 - This enables security analysts to query and visualize incidents, attack paths, and asset-alert relationships directly in Neo4j.
 
+**Deep Packet Inspection (Zeek DPI Engine):**
+- The stack integrates [Zeek](https://zeek.org/) as a DPI engine, running in host mode and capturing detailed protocol and session logs in JSON format.
+- The `dpi_event_forwarder` service tails Zeek's JSON logs and publishes each event to the Kafka topic `dpi.events`.
+- This enables real-time application-layer visibility and session analytics for the platform.
+
 **Environment Variables:**  
 - See `sensors/asset_discovery/asset_discovery.py`, `services/topology_updater/topology_updater.py`, `sensors/traffic_analysis/traffic_analysis.py`, `sensors/encrypted_traffic_analysis/encrypted_traffic_analysis.py`, and `sensors/ids_alert_forwarder/ids_alert_forwarder.py` for configurable parameters.
 

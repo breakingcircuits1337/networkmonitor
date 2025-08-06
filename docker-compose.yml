@@ -149,6 +149,28 @@ alert_sink_neo4j:
       - kafka
       - neo4j
 
+zeek:
+    image: blacktop/zeek:latest
+    container_name: zeek
+    network_mode: "host"
+    command: ["-i", "eth0", "-C", "Local::enable_local_scripts=F", "LogAscii::json=T"]
+    volumes:
+      - zeek_logs:/usr/local/zeek/logs
+
+  dpi_event_forwarder:
+    build: ./sensors/dpi_event_forwarder
+    container_name: dpi_event_forwarder
+    volumes:
+      - zeek_logs:/usr/local/zeek/logs:ro
+    environment:
+      LOG_DIR: "/usr/local/zeek/logs/current"
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "dpi.events"
+    depends_on:
+      - kafka
+      - zeek
+
 volumes:
   neo4j_data:
   suricata_logs:
+  zeek_logs:
