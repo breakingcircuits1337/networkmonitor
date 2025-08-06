@@ -47,8 +47,15 @@ docker-compose up --build
 - Topology Updater service will automatically consume asset records and update the Neo4j graph in real time
 - Traffic Analysis sensor (host-mode container) sniffs interface traffic, summarizes flows, and publishes to Kafka topic `netflow` every 30 seconds
 - **Encrypted Traffic Analysis Sensor**: (host-mode container) monitors TLS handshakes, extracts JA3/JA3S/SNI/fingerprint metadata, and publishes to Kafka topic `tls.meta`.
-- **Suricata IDS/IPS**: Monitors all traffic for known threats, outputs alerts to `eve.json`.
+- **Suricata IDS/IPS**: Monitors all traffic for known threats, outputs alerts to `eve.json`.  
+  - Uses Emerging Threats Open rules by default; set `ET_PRO_API_KEY` env var for ET Pro rules.
+
 - **IDS Alert Forwarder**: Reads Suricata EVE alerts and forwards them to Kafka topic `security.alerts`.
+
+**SOAR Blocker**:  
+- The `soar_blocker` service listens for high-severity IDS alerts and high UEBA anomaly scores.  
+- Automatically executes a blocklist command (e.g., iptables or API call) for malicious source IPs, and logs the action.  
+- Configure thresholds and the command via environment variables.
 
 **Viewing Suricata Alerts in Neo4j:**
 - Future feature: Security alerts from `security.alerts` topic will be correlated with asset and flow data in Neo4j, enabling rich threat hunting and investigation workflows. (Work in progress.)

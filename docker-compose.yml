@@ -86,7 +86,14 @@ services:
     network_mode: "host"
 
   suricata:
-    image: jasonish/suricata:latest
+    build: ./sensors/suricata_custom
+    container_name: suricata
+    network_mode: "host"
+    environment:
+      ET_PRO_API_KEY: ${ET_PRO_API_KEY:-}
+    command: ["-i", "eth0", "-C", "--set", "logging.json=yes"]
+    volumes:
+      - suricata_logs:/var/log/suricata
     container_name: suricata
     network_mode: "host"
     volumes:
@@ -191,6 +198,19 @@ geoip_enricher:
       - "8080:80"
     depends_on:
       - geoip_enricher
+
+soar_blocker:
+    build: ./services/soar_blocker
+    container_name: soar_blocker
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      IDS_TOPIC: "security.alerts"
+      UEBA_TOPIC: "ueba.alerts"
+      SEVERITY_THRESHOLD: 2
+      ANOMALY_THRESHOLD: 0.5
+      BLOCKLIST_CMD: "echo 'iptables -A INPUT -s {ip} -j DROP'"
+    depends_on:
+      - kafka
 
 volumes:
   neo4j_data:
