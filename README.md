@@ -44,9 +44,10 @@ docker-compose up --build
 - Access Neo4j at [http://localhost:7474](http://localhost:7474) (user: neo4j / password: neo4jpassword)
 - Kafka broker is available at `localhost:9092`
 - Asset discovery logs will appear in the compose output
+- Topology Updater service will automatically consume asset records and update the Neo4j graph in real time
 
 **Environment Variables:**  
-- See `sensors/asset_discovery/asset_discovery.py` for configurable parameters.
+- See `sensors/asset_discovery/asset_discovery.py` and `services/topology_updater/topology_updater.py` for configurable parameters.
 
 **Note:**  
 No real secrets or credentials are stored in this repository.  
