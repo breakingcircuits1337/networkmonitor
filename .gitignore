@@ -1,4 +1,10 @@
 __pycache__/
 *.pyc
 .env
+.env.*
 neo4j_data/
+GeoLite2-City.mmdb
+CLAUDE.md
+*.mmdb
+chrome/
+*.log

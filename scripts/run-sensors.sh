@@ -4,7 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== BCs_NetSec Sensor Runner ==="
+echo "=== NetworkMonitor Sensor Runner ==="
 echo ""
 
 # Check if running as root
@@ -22,7 +22,7 @@ pip3 install --user kafka-python python-nmap scapy watchdog neo4j 2>/dev/null
 export KAFKA_BOOTSTRAP="localhost:9092"
 export NEO4J_URI="bolt://localhost:7687"
 export NEO4J_USER="neo4j"
-export NEO4J_PASSWORD="neo4jpassword"
+export NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4jpassword}"
 
 echo "[2/4] Starting sensors..."
 
@@ -48,7 +48,7 @@ echo "[4/4] All sensors running!"
 echo ""
 echo "Services:"
 echo "  Kafka:    localhost:9092"
-echo "  Neo4j:    localhost:7474 (neo4j/neo4jpassword)"
+echo "  Neo4j:    localhost:7474 (neo4j / your NEO4J_PASSWORD)"
 echo "  Kafka UI: localhost:8080"
 echo ""
 echo "Press Ctrl+C to stop all sensors"

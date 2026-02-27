@@ -13,7 +13,8 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Pull latest images and rebuild
-cd /home/sarah/networkmonitor
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "📦 Building and starting services..."
 docker-compose up --build -d
@@ -33,7 +34,7 @@ echo ""
 echo "🌐 Access Points:"
 echo "   UI Dashboard:     http://${HOST_IP}:8080"
 echo "   Neo4j Browser:   http://${HOST_IP}:7474"
-echo "   Sarah API:       http://${HOST_IP}:5000"
+echo "   AI Chat API:     http://${HOST_IP}:5000"
 echo ""
 echo "🔧 Ollama (on host):"
 echo "   Install:         curl -fsSL https://ollama.com/install.sh | sh"
