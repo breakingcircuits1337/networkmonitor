@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY requirements.txt .
+COPY sensors/dpi_event_forwarder/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY dpi_event_forwarder.py .
-COPY ../../common /app/common
+COPY sensors/dpi_event_forwarder/dpi_event_forwarder.py .
+COPY common /app/common
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "dpi_event_forwarder.py"]

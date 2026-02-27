@@ -2,17 +2,73 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Network Geo Heatmap</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" />
-    <link rel="stylesheet" href="/styles.css" />
+    <title>NETWATCH // Network Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
     <style>
-      html, body, #root { height: 100%; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-      #map { height: 100vh; width: 100vw; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root { width: 100%; height: 100%; background: #000010; overflow: hidden; }
+
+      :root {
+        --cyan:   #00e5ff;
+        --red:    #e53935;
+        --orange: #FF6F00;
+        --purple: #7c51a1;
+        --teal:   #00BCD4;
+        --green:  #00e676;
+        --glass:  rgba(0, 8, 20, 0.72);
+        --border: rgba(0, 229, 255, 0.18);
+        --glow:   0 0 18px rgba(0, 229, 255, 0.25);
+      }
+
+      /* Scrollbars */
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+      /* Scanline sweep */
+      @keyframes scanline {
+        0%   { top: -2px; opacity: 0; }
+        5%   { opacity: 1; }
+        95%  { opacity: 1; }
+        100% { top: 100vh; opacity: 0; }
+      }
+      .scanline {
+        position: fixed; left: 0; width: 100%; height: 2px;
+        background: linear-gradient(transparent, rgba(0,229,255,0.18), transparent);
+        animation: scanline 10s linear infinite;
+        pointer-events: none; z-index: 9;
+      }
+
+      /* Subtle grid */
+      .grid-overlay {
+        position: fixed; inset: 0;
+        background-image:
+          linear-gradient(rgba(0,229,255,0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0,229,255,0.025) 1px, transparent 1px);
+        background-size: 50px 50px;
+        pointer-events: none; z-index: 8;
+      }
+
+      /* Neon glow pulse for critical */
+      @keyframes glow-pulse {
+        0%, 100% { box-shadow: 0 0 8px var(--red); }
+        50%       { box-shadow: 0 0 22px var(--red), 0 0 40px rgba(229,57,53,0.4); }
+      }
+      .critical-glow { animation: glow-pulse 1.4s ease-in-out infinite; }
+
+      /* Range input */
+      input[type=range] { accent-color: var(--cyan); }
+
+      /* Glassmorphism base */
+      .glass {
+        background: var(--glass);
+        backdrop-filter: blur(20px) saturate(160%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        border: 1px solid var(--border);
+        box-shadow: var(--glow);
+      }
     </style>
   </head>
   <body>

@@ -10,7 +10,8 @@ CREATE STREAM asset_stream (
 ) WITH (
   KAFKA_TOPIC='asset.discovery',
   VALUE_FORMAT='JSON',
-  TIMESTAMP='timestamp'
+  TIMESTAMP='timestamp',
+  TIMESTAMP_FORMAT='yyyy-MM-dd HH:mm:ss'
 );
 
 -- MATERIALIZED TABLE keyed by IP for latest asset state

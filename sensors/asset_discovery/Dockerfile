@@ -5,12 +5,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+COPY sensors/asset_discovery/requirements.txt .
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY asset_discovery.py .
-# Copy common config loader
-COPY ../../common /app/common
+COPY sensors/asset_discovery/asset_discovery.py .
+COPY common /app/common
 
 ENV PYTHONUNBUFFERED=1
 

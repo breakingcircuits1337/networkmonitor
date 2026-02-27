@@ -67,8 +67,9 @@ def packet_handler(pkt):
 
 def flush_flows(producer, topic):
     global flows
+    snapshot, flows = flows, {}
     count = 0
-    for flow in flows.values():
+    for flow in snapshot.values():
         record = {
             "src_ip": flow["src_ip"],
             "dst_ip": flow["dst_ip"],
@@ -84,7 +85,6 @@ def flush_flows(producer, topic):
         count += 1
     producer.flush()
     logger.info(f"Flushed {count} flow records to Kafka topic '{topic}'")
-    flows = {}
 
 def periodic_flusher(producer, topic, window_seconds):
     while not shutdown_event.is_set():

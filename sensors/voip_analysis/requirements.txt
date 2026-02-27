@@ -1,0 +1,3 @@
+pyshark
+kafka-python-ng
+python-dotenv

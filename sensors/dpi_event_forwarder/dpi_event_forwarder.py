@@ -96,7 +96,6 @@ def main():
     tailer = LogFileTailer(producer, kafka_topic)
     observer = Observer()
     handler = ZeekLogHandler(tailer, log_dir)
-    observer.schedule(handler, log_dir, recursive=False)
 
     stop_flag = {"stop": False}
     def handle_sigterm(sig, frame):
@@ -106,7 +105,7 @@ def main():
 
     signal.signal(signal.SIGTERM, handle_sigterm)
 
-    # Initial scan (may not exist yet if Zeek not started)
+    # Wait for Zeek log dir to be created before starting watchdog
     for _ in range(20):
         if os.path.exists(log_dir):
             initial_scan(log_dir, tailer)
@@ -117,6 +116,8 @@ def main():
     else:
         logger.warning(f"Log dir {log_dir} not found after waiting, continuing anyway.")
 
+    if os.path.exists(log_dir):
+        observer.schedule(handler, log_dir, recursive=False)
     observer.start()
     try:
         while not stop_flag["stop"]:

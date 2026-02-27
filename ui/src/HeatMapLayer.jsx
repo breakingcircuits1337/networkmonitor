@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { useMap } from "react-leaflet";
+import L from "leaflet";
 import "leaflet.heat";
 
 export default function HeatMapLayer({ points }) {
   const map = useMap();
   useEffect(() => {
-    if (!map || !window.L.heatLayer) return;
+    if (!map || !L.heatLayer) return;
     // Remove existing
     if (map._heatLayer) {
       map.removeLayer(map._heatLayer);
@@ -15,7 +16,7 @@ export default function HeatMapLayer({ points }) {
       .filter((p) => p.lat !== undefined && p.lon !== undefined)
       .map((p) => [p.lat, p.lon, Math.max(0.2, Math.log(1 + (p.bytes || 1))/10)]);
     if (heatPoints.length === 0) return;
-    const heat = window.L.heatLayer(heatPoints, {
+    const heat = L.heatLayer(heatPoints, {
       radius: 18,
       blur: 18,
       maxZoom: 6,

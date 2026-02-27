@@ -10,7 +10,13 @@ import signal
 from scapy.all import sniff, TCP, IP, Raw
 from scapy.layers.tls.handshake import TLSClientHello, TLSServerHello
 from scapy.layers.tls.record import TLS
-from scapy.layers.tls.extensions import TLSServerNameIndication
+try:
+    from scapy.layers.tls.extensions import TLSServerNameIndication
+except ImportError:
+    try:
+        from scapy.layers.tls.extensions import TLS_Ext_ServerName as TLSServerNameIndication
+    except ImportError:
+        TLSServerNameIndication = None
 from kafka import KafkaProducer
 
 from common.config import get_env
@@ -95,31 +101,37 @@ def parse_tls(pkt):
     if not pkt.haslayer(TLS):
         return None
     tls = pkt[TLS]
-    for record in tls.records:
-        if hasattr(record, "msg"):
-            for msg in record.msg:
-                if isinstance(msg, TLSClientHello):
-                    # Direction: client
-                    ja3_str, ja3_hash = compute_ja3(msg)
-                    sni = get_sni(msg)
-                    return {
-                        "direction": "client",
-                        "ja3": ja3_str,
-                        "ja3_hash": ja3_hash,
-                        "sni": sni,
-                        "ja3s": None,
-                        "ja3s_hash": None
-                    }
-                elif isinstance(msg, TLSServerHello):
-                    ja3s_str, ja3s_hash = compute_ja3s(msg)
-                    return {
-                        "direction": "server",
-                        "ja3": None,
-                        "ja3_hash": None,
-                        "sni": None,
-                        "ja3s": ja3s_str,
-                        "ja3s_hash": ja3s_hash
-                    }
+    # Scapy 2.5+: messages are in tls.msg directly; older: tls.records[].msg
+    msgs = []
+    if hasattr(tls, "msg") and tls.msg:
+        msgs = tls.msg if isinstance(tls.msg, list) else [tls.msg]
+    elif hasattr(tls, "records"):
+        for record in tls.records:
+            if hasattr(record, "msg"):
+                ext = record.msg if isinstance(record.msg, list) else [record.msg]
+                msgs.extend(ext)
+    for msg in msgs:
+        if isinstance(msg, TLSClientHello):
+            ja3_str, ja3_hash = compute_ja3(msg)
+            sni = get_sni(msg)
+            return {
+                "direction": "client",
+                "ja3": ja3_str,
+                "ja3_hash": ja3_hash,
+                "sni": sni,
+                "ja3s": None,
+                "ja3s_hash": None
+            }
+        elif isinstance(msg, TLSServerHello):
+            ja3s_str, ja3s_hash = compute_ja3s(msg)
+            return {
+                "direction": "server",
+                "ja3": None,
+                "ja3_hash": None,
+                "sni": None,
+                "ja3s": ja3s_str,
+                "ja3s_hash": ja3s_hash
+            }
     return None
 
 def main():

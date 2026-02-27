@@ -40,16 +40,16 @@ def main():
         retries=5
     )
 
-    stop_event = False
+    import threading
+    stop_event = threading.Event()
     def handle_sigterm(sig, frame):
-        nonlocal stop_event
-        stop_event = True
+        stop_event.set()
         logger.info("Received SIGTERM, shutting down...")
 
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     try:
-        for line in tail_f(eve_file, lambda: stop_event):
+        for line in tail_f(eve_file, stop_event):
             try:
                 data = json.loads(line)
                 if data.get("event_type") in ("alert", "anomaly", "http", "dns"):
@@ -59,7 +59,7 @@ def main():
                         logger.info(f"Forwarded {alert_count} IDS alerts to Kafka")
             except Exception as e:
                 logger.warning(f"Failed to parse/forward EVE line: {e}")
-            if stop_event:
+            if stop_event.is_set():
                 break
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt received, shutting down...")
