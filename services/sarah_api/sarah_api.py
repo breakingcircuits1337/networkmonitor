@@ -94,8 +94,8 @@ def get_threat_summary() -> dict:
             _summary_cache["data"] = data
             _summary_cache["ts"] = now
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[sarah_api] ai_analyst unreachable: {e}")
     return {}
 
 
@@ -378,10 +378,10 @@ def summary():
         "Based on the network state below provide a 3-4 sentence threat summary. "
         "Cover: threat level, top concerns, recommended action.\n\n" + context
     )
-    result = query_ollama(prompt, "")
+    narrative, _ = query_ollama(prompt, "")
     return jsonify({
         "type":         "live_fallback",
-        "narrative":    result or "No significant threats detected.",
+        "narrative":    narrative or "No significant threats detected.",
         "alerts_count": len(alerts),
         "voip_events":  len(voip),
     })

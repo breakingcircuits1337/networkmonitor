@@ -59,7 +59,12 @@ def parse_sip_packet(pkt):
                 call['end_time'] = event['timestamp']
                 call['call_status'] = 'ended'
                 event['call_status'] = 'ended'
-                event['duration'] = call.get('start_time')
+                try:
+                    start = datetime.fromisoformat(call['start_time'])
+                    end = datetime.fromisoformat(event['timestamp'])
+                    event['duration'] = round((end - start).total_seconds(), 2)
+                except Exception:
+                    event['duration'] = None
                 
         elif method == 'ACK':
             if event['call_id'] in active_calls:

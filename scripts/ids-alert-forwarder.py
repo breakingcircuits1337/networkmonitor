@@ -34,9 +34,13 @@ class EveHandler(FileSystemEventHandler):
                             if alert.get('event_type') == 'alert':
                                 print(f"Alert: {alert.get('alert', {}).get('signature', 'Unknown')}")
                                 producer.send(KAFKA_TOPIC, alert)
-                        except: pass
+                        except json.JSONDecodeError as e:
+                            print(f"JSON parse error: {e}")
+                        except Exception as e:
+                            print(f"Error forwarding alert: {e}")
                     self.position = f.tell()
-            except: pass
+            except Exception as e:
+                print(f"Error reading eve.json: {e}")
 
 handler = EveHandler()
 observer = Observer()
