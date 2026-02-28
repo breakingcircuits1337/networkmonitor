@@ -133,12 +133,20 @@ def kafka_consumer_thread():
         return "LAN", home_lat, home_lon
 
     def _resolve_coords(src_ip):
-        """GeoIP lookup with RFC1918 fallback to home coords."""
+        """GeoIP lookup with RFC1918 / bogon fallback to home coords.
+
+        Covers all special-purpose ranges that will never appear in the
+        GeoLite2 database: private, loopback, link-local, multicast,
+        reserved blocks, and the unspecified address.  Without this, those
+        IPs silently drop events instead of pinning to the home sensor.
+        """
         country, lat, lon = geoip_lookup(src_ip, reader) if src_ip else (None, None, None)
         if (lat is None or lon is None) and src_ip:
             try:
                 addr = ipaddress.ip_address(src_ip)
-                if addr.is_private or addr.is_loopback:
+                if (addr.is_private or addr.is_loopback or addr.is_link_local
+                        or addr.is_multicast or addr.is_reserved
+                        or addr.is_unspecified):
                     return _home_coords()
             except Exception:
                 pass

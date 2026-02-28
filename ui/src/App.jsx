@@ -97,9 +97,10 @@ export default function App() {
   const [timelinePos, setTimelinePos] = useState(nowSec());
   const [play,        setPlay]        = useState(false);
   const [connected,   setConnected]   = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roles,       setRoles]       = useState([]);
-  const [viewMode,    setViewMode]    = useState("globe"); // "globe" or "map"
+  const [sidebarOpen,    setSidebarOpen]    = useState(false);
+  const [roles,          setRoles]          = useState([]);
+  const [viewMode,       setViewMode]       = useState("globe"); // "globe" or "map"
+  const [selectedPoint,  setSelectedPoint]  = useState(null);
 
   // Globe size — needs explicit px for Three.js renderer
   const [globeW, setGlobeW] = useState(window.innerWidth);
@@ -326,7 +327,14 @@ export default function App() {
         pointAltitude={0.015}
         pointLabel={pointLabel}
         onPointClick={p => {
-          if (p.src_ip) window.open(assetLink(p.src_ip), "_blank");
+          setSelectedPoint(p);
+          if (globeRef.current) {
+            globeRef.current.pointOfView(
+              { lat: p.lat, lng: toLng(p), altitude: 0.4 },
+              1200
+            );
+            globeRef.current.controls().autoRotate = false;
+          }
         }}
 
         // ── Arcs layer — IDS attack paths ─────────────────────────────────────
@@ -505,6 +513,17 @@ export default function App() {
 
       {/* ── AI Chat widget ───────────────────────────────────────────────── */}
       <SarahChatWidget darkMode={true} />
+
+      {/* ── Threat detail modal (globe click) ────────────────────────────── */}
+      {selectedPoint && (
+        <ThreatModal
+          point={selectedPoint}
+          onClose={() => {
+            setSelectedPoint(null);
+            if (globeRef.current) globeRef.current.controls().autoRotate = true;
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -973,5 +992,136 @@ function IpTraceForm() {
         </div>
       )}
     </form>
+  );
+}
+
+// ─── Threat Detail Modal (click-to-zoom + Street View) ───────────────────────
+function ThreatModal({ point, onClose }) {
+  const lat = point.lat;
+  const lng = toLng(point);
+  const col   = point._col || "#00e5ff";
+  const topic = (point.topic || point.event_type || "EVENT").toUpperCase();
+
+  // Google Maps satellite embed — no API key required for the classic embed URL
+  const mapsEmbedUrl =
+    `https://maps.google.com/maps?q=${lat},${lng}&z=16&t=k&output=embed`;
+
+  // Google Maps street-level URL that opens Street View mode
+  const streetViewUrl =
+    `https://www.google.com/maps/@${lat},${lng},3a,75y,0h,90t/data=!3m1!1e1`;
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 3000,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(5px)",
+      }}
+    >
+      <div style={{
+        background: "rgba(0,8,20,0.97)",
+        border: `1px solid ${col}44`,
+        borderRadius: 10,
+        width: 540, maxWidth: "95vw",
+        maxHeight: "88vh",
+        display: "flex", flexDirection: "column",
+        boxShadow: `0 0 48px ${col}22, 0 0 120px rgba(0,0,0,0.8)`,
+        overflow: "hidden",
+      }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          borderBottom: `1px solid ${col}22`,
+          flexShrink: 0,
+        }}>
+          <span style={{
+            fontFamily: "'Share Tech Mono', monospace",
+            color: col, fontSize: 12, letterSpacing: 2,
+            textShadow: `0 0 8px ${col}66`,
+          }}>
+            ⚠ {topic} · {point.src_ip || `${lat.toFixed(3)},${lng.toFixed(3)}`}
+          </span>
+          <button onClick={onClose} style={{
+            background: "none", border: "none",
+            color: "rgba(255,255,255,0.45)", cursor: "pointer",
+            fontSize: 18, padding: "0 4px", lineHeight: 1,
+          }}>✕</button>
+        </div>
+
+        {/* ── Intel fields ── */}
+        <div style={{
+          padding: "10px 16px",
+          fontFamily: "monospace", fontSize: 11, color: "#ccc",
+          display: "flex", flexWrap: "wrap", gap: "3px 18px",
+          flexShrink: 0,
+          borderBottom: `1px solid ${col}11`,
+        }}>
+          {point.src_ip     && <span><b style={{ color: col }}>src </b>{point.src_ip}{point.src_port ? `:${point.src_port}` : ""}</span>}
+          {point.dst_ip     && <span><b style={{ color: col }}>dst </b>{point.dst_ip}</span>}
+          {point.signature  && <span style={{ width: "100%" }}><b style={{ color: col }}>sig </b>{point.signature}</span>}
+          {point.severity !== undefined && <span><b style={{ color: col }}>sev </b>{point.severity}</span>}
+          {point.country    && <span><b style={{ color: col }}>cc  </b>{point.country}</span>}
+          {point.summary    && <span style={{ width: "100%" }}><b style={{ color: col }}>ai  </b>{point.summary}</span>}
+          <span><b style={{ color: col }}>geo </b>{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+          {point._ts        && <span style={{ opacity: 0.45 }}>{fmtTime(point._ts)}</span>}
+        </div>
+
+        {/* ── Embedded satellite map ── */}
+        <div style={{ flex: 1, minHeight: 260, position: "relative", background: "#111" }}>
+          <iframe
+            title="threat-location-map"
+            src={mapsEmbedUrl}
+            width="100%"
+            height="100%"
+            style={{ border: "none", display: "block" }}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+
+        {/* ── Footer actions ── */}
+        <div style={{
+          display: "flex", gap: 8, padding: "10px 16px",
+          borderTop: `1px solid ${col}22`,
+          flexShrink: 0,
+        }}>
+          <a
+            href={streetViewUrl}
+            target="_blank" rel="noreferrer"
+            style={{
+              flex: 1, textAlign: "center", padding: "7px 0",
+              background: "rgba(66,133,244,0.15)",
+              border: "1px solid rgba(66,133,244,0.4)",
+              borderRadius: 5, color: "#4285f4",
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: 11, letterSpacing: 1, textDecoration: "none",
+            }}
+          >
+            STREET VIEW ↗
+          </a>
+          {point.src_ip && (
+            <a
+              href={assetLink(point.src_ip)}
+              target="_blank" rel="noreferrer"
+              style={{
+                flex: 1, textAlign: "center", padding: "7px 0",
+                background: "rgba(0,229,255,0.08)",
+                border: "1px solid rgba(0,229,255,0.3)",
+                borderRadius: 5, color: "#00e5ff",
+                fontFamily: "'Share Tech Mono', monospace",
+                fontSize: 11, letterSpacing: 1, textDecoration: "none",
+              }}
+            >
+              NEO4J ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
