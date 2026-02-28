@@ -695,6 +695,12 @@ function GlobeSidebar({
 
         <Divider />
 
+        {/* ── IP Trace ── */}
+        <SectionLabel style={{ color: "#00e676" }}>// IP TRACE</SectionLabel>
+        <IpTraceForm />
+
+        <Divider />
+
         {/* ── Sub-agent roles ── */}
         <SectionLabel>// AI SUB-AGENTS</SectionLabel>
         {roles.length === 0 ? (
@@ -871,6 +877,99 @@ function PacketLauncherForm() {
           border:    `1px solid ${isErr ? "rgba(229,57,53,0.3)" : "rgba(0,230,118,0.3)"}`,
         }}>
           {result}
+        </div>
+      )}
+    </form>
+  );
+}
+
+// ─── IP Trace Form ────────────────────────────────────────────────────────────
+function IpTraceForm() {
+  const [ip,     setIp]     = useState("");
+  const [maxTtl, setMaxTtl] = useState(30);
+  const [hops,   setHops]   = useState(null);
+  const [error,  setError]  = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleTrace(e) {
+    e.preventDefault();
+    setHops(null); setError(""); setLoading(true);
+    try {
+      const res = await fetch("/trace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip, max_ttl: +maxTtl, timeout: 1 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Error");
+      } else {
+        setHops(data.hops || []);
+      }
+    } catch {
+      setError("Network error.");
+    } finally { setLoading(false); }
+  }
+
+  const inp = {
+    background: "rgba(0,229,255,0.04)", color: "#e8e8e8",
+    border: "1px solid rgba(0,229,255,0.2)", borderRadius: 4,
+    padding: "4px 7px", fontSize: 12, fontFamily: "monospace",
+    outline: "none",
+  };
+
+  return (
+    <form onSubmit={handleTrace} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", gap: 5 }}>
+        <input type="text" value={ip} onChange={e => setIp(e.target.value)}
+          placeholder="Target IP" required style={{ ...inp, flex: 1 }} />
+        <input type="number" value={maxTtl} onChange={e => setMaxTtl(e.target.value)}
+          placeholder="Max TTL" min={1} max={64} style={{ ...inp, width: 66 }} />
+      </div>
+      <button type="submit" disabled={loading} style={{
+        background: loading
+          ? "rgba(0,230,118,0.15)"
+          : "rgba(0,230,118,0.5)",
+        color: "#fff",
+        border: "1px solid rgba(0,230,118,0.4)",
+        borderRadius: 5, padding: "7px 0",
+        cursor: loading ? "wait" : "pointer",
+        fontFamily: "'Share Tech Mono', monospace",
+        fontSize: 11, letterSpacing: 2,
+        transition: "background 0.2s",
+      }}>
+        {loading ? "TRACING…" : "TRACE"}
+      </button>
+      {error && (
+        <div style={{
+          fontFamily: "monospace", fontSize: 11,
+          padding: "5px 8px", borderRadius: 4,
+          background: "rgba(229,57,53,0.12)", color: "#e53935",
+          border: "1px solid rgba(229,57,53,0.3)",
+        }}>
+          {error}
+        </div>
+      )}
+      {hops && hops.length > 0 && (
+        <div style={{
+          fontFamily: "monospace", fontSize: 11,
+          background: "rgba(0,230,118,0.05)",
+          border: "1px solid rgba(0,230,118,0.2)",
+          borderRadius: 4, padding: "6px 8px",
+          maxHeight: 180, overflowY: "auto",
+          display: "flex", flexDirection: "column", gap: 2,
+        }}>
+          {hops.map(h => (
+            <div key={h.hop} style={{ display: "flex", gap: 8, color: h.ip === "*" ? "rgba(0,230,118,0.35)" : "#00e676" }}>
+              <span style={{ width: 20, textAlign: "right", flexShrink: 0 }}>{h.hop}</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {h.ip}
+              </span>
+              <span style={{ flexShrink: 0, color: "rgba(0,230,118,0.6)" }}>
+                {h.rtt_ms !== null ? `${h.rtt_ms}ms` : "* * *"}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </form>

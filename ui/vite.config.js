@@ -14,6 +14,7 @@ export default defineConfig({
       "/health":  "http://localhost:5000",
       "/analyst": "http://localhost:5001",
       "/launch":  "http://localhost:7000",
+      "/trace":   "http://localhost:7000",
     },
   },
 });
