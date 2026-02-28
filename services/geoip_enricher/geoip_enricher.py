@@ -180,6 +180,8 @@ def kafka_consumer_thread():
                     event_type = "ai_analysis"
                 elif topic == "blocklist.actions":
                     event_type = "blocklist"
+                elif topic == "fingerprint.events":
+                    event_type = "fingerprint"
                 else:
                     event_type = "other"
 
@@ -251,6 +253,23 @@ def kafka_consumer_thread():
                                   "summary", "recommendation", "source_topic"):
                         geo_event[field] = ev.get(field, "")
 
+                elif event_type == "fingerprint":
+                    src_ip    = ev.get("src_ip", "")
+                    dst_ip    = ev.get("dst_ip", "")
+                    timestamp = ev.get("timestamp") or now_str
+                    geo_event["dst_ip"] = dst_ip
+                    # Carry all fingerprint-specific fields through to the UI
+                    for field in ("fp_subtype", "os_guess", "os_confidence",
+                                  "ttl", "init_ttl", "window", "df",
+                                  "mss", "window_scale", "tcp_options",
+                                  "ssh_banner", "via", "x_forwarded_for",
+                                  "x_real_ip", "user_agent",
+                                  "query", "edns_payload_size", "edns_do_bit"):
+                        if field in ev:
+                            geo_event[field] = ev[field]
+                    # tag sub-type so UI can differentiate
+                    geo_event["fp_subtype"] = ev.get("event_type", "os_fingerprint")
+
                 geo_event.update({
                     "src_ip":    src_ip,
                     "dst_ip":    dst_ip,
@@ -261,8 +280,8 @@ def kafka_consumer_thread():
                 country, lat, lon = _resolve_coords(src_ip)
 
                 # Pin non-flow events with unresolvable coords to home base
-                # (VoIP/AI analysis from LAN IPs have no public GeoIP entry)
-                if (lat is None or lon is None) and event_type != "flow":
+                # (VoIP/AI analysis/fingerprint events from LAN IPs have no public GeoIP entry)
+                if (lat is None or lon is None) and event_type not in ("flow", "raw_flow"):
                     country, lat, lon = _home_coords()
 
                 geo_event["country"] = country
@@ -273,7 +292,7 @@ def kafka_consumer_thread():
                     continue  # drop flows with no coords (can't place on globe)
 
                 # Publish geo-enriched event to geo.events (flows/alerts/DPI only)
-                if event_type not in ("ai_analysis", "voip"):
+                if event_type not in ("ai_analysis", "voip", "fingerprint"):
                     producer.send(out_topic, geo_event)
 
                 _push_sse(geo_event)

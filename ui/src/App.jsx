@@ -85,6 +85,7 @@ export default function App() {
   const [dpiEvents,  setDpiEvents]  = useState([]);
   const [voipEvents, setVoipEvents] = useState([]);
   const [aiEvents,   setAiEvents]   = useState([]);
+  const [fpEvents,   setFpEvents]   = useState([]);
 
   const [showFlows, setShowFlows] = useState(true);
   const [showIds,   setShowIds]   = useState(true);
@@ -92,6 +93,7 @@ export default function App() {
   const [showVoip,  setShowVoip]  = useState(true);
   const [showAi,    setShowAi]    = useState(true);
   const [showArcs,  setShowArcs]  = useState(true);
+  const [showFp,    setShowFp]    = useState(true);
 
   const [windowSec,   setWindowSec]   = useState(DEFAULT_WINDOW);
   const [timelinePos, setTimelinePos] = useState(nowSec());
@@ -160,6 +162,8 @@ export default function App() {
       push(setVoipEvents, MAX_ALERTS);
     } else if (topic === "ai.analysis") {
       push(setAiEvents, MAX_ALERTS);
+    } else if (topic === "fingerprint.events") {
+      push(setFpEvents, MAX_ALERTS);
     }
 
     setTimelinePos(curr => Math.max(curr, ts));
@@ -204,6 +208,8 @@ export default function App() {
   const filteredDpi    = onGlobe(dpiEvents);
   const filteredVoip   = onGlobe(voipEvents);
   const filteredAi     = onGlobe(aiEvents);
+  // OS fingerprint events — only show os_fingerprint sub-type on globe (SSH/DNS too noisy)
+  const filteredFp     = onGlobe(fpEvents).filter(e => e.fp_subtype === "os_fingerprint");
   const aiCritical     = filteredAi.filter(
     a => a.severity === "critical" || a.severity === "high"
   ).length;
@@ -232,8 +238,9 @@ export default function App() {
     if (showDpi)  filteredDpi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#7c51a1",                              _r: 0.28 }));
     if (showVoip) filteredVoip.forEach(p => pts.push({ ...p, lng: toLng(p), _col: "#00BCD4",                              _r: 0.32 }));
     if (showAi)   filteredAi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: AI_SEV_COLOR[p.severity] || "#9E9E9E",  _r: 0.42 }));
+    if (showFp)   filteredFp.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#FFC107",                              _r: 0.22 }));
     return pts;
-  }, [filteredIds, filteredDpi, filteredVoip, filteredAi, showIds, showDpi, showVoip, showAi]); // eslint-disable-line
+  }, [filteredIds, filteredDpi, filteredVoip, filteredAi, filteredFp, showIds, showDpi, showVoip, showAi, showFp]); // eslint-disable-line
 
   // Arcs — IDS alerts (red) + raw flows (protocol color)
   const arcs = useMemo(() => {
@@ -497,6 +504,7 @@ export default function App() {
         showVoip={showVoip}    setShowVoip={setShowVoip}
         showAi={showAi}        setShowAi={setShowAi}
         showArcs={showArcs}    setShowArcs={setShowArcs}
+        showFp={showFp}        setShowFp={setShowFp}
         play={play}            setPlay={setPlay}
         minTs={minTs}          maxTs={maxTs}
         timelinePos={timelinePos} setTimelinePos={setTimelinePos}
@@ -506,6 +514,7 @@ export default function App() {
         filteredDpi={filteredDpi}
         filteredVoip={filteredVoip}
         filteredAi={filteredAi}
+        filteredFp={filteredFp}
         aiCritical={aiCritical}
         globeRef={globeRef}
         roles={roles}
@@ -548,9 +557,10 @@ function GlobeSidebar({
   showFlows, setShowFlows, showIds, setShowIds,
   showDpi, setShowDpi, showVoip, setShowVoip,
   showAi, setShowAi, showArcs, setShowArcs,
+  showFp, setShowFp,
   play, setPlay, minTs, maxTs, timelinePos, setTimelinePos,
   windowSec, setWindowSec,
-  filteredFlows, filteredIds, filteredDpi, filteredVoip, filteredAi, aiCritical,
+  filteredFlows, filteredIds, filteredDpi, filteredVoip, filteredAi, filteredFp, aiCritical,
   globeRef, roles,
 }) {
   return (
@@ -586,6 +596,7 @@ function GlobeSidebar({
             [showVoip,  setShowVoip,  "#00BCD4", "VoIP"],
             [showAi,    setShowAi,    "#FF6F00", "AI Analysis"],
             [showArcs,  setShowArcs,  "#e53935", "Attack Arcs"],
+            [showFp,    setShowFp,    "#FFC107", "OS Fingerprints"],
           ].map(([val, setter, col, label]) => (
             <label key={label} style={{
               display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
@@ -619,6 +630,7 @@ function GlobeSidebar({
             ["VOIP",    filteredVoip.length,  "#00BCD4"],
             ["AI",      filteredAi.length,    "#FF6F00"],
             ["HI/CRIT", aiCritical,           aiCritical > 0 ? "#e53935" : "rgba(0,229,255,0.25)"],
+            ["OS FP",   filteredFp.length,    filteredFp.length > 0 ? "#FFC107" : "rgba(0,229,255,0.25)"],
           ].map(([label, count, col]) => (
             <div key={label} style={{
               background: "rgba(0,229,255,0.03)",
@@ -791,6 +803,7 @@ function GlobeSidebar({
             ["#FF6F00", "AI-med"],
             ["#e53935", "AI-high"],
             ["#7b0000", "AI-crit"],
+            ["#FFC107", "OS-fp"],
           ].map(([col, label]) => (
             <span key={label} style={{ color: "rgba(0,229,255,0.6)" }}>
               <span style={{ color: col }}>●</span> {label}
@@ -1067,6 +1080,26 @@ function ThreatModal({ point, onClose }) {
           {point.severity !== undefined && <span><b style={{ color: col }}>sev </b>{point.severity}</span>}
           {point.country    && <span><b style={{ color: col }}>cc  </b>{point.country}</span>}
           {point.summary    && <span style={{ width: "100%" }}><b style={{ color: col }}>ai  </b>{point.summary}</span>}
+
+          {/* ── Passive fingerprint fields ── */}
+          {point.os_guess   && (
+            <span style={{ width: "100%" }}>
+              <b style={{ color: col }}>os  </b>
+              {point.os_guess}
+              {point.os_confidence != null && (
+                <span style={{ opacity: 0.5 }}> (conf {point.os_confidence})</span>
+              )}
+            </span>
+          )}
+          {point.ttl        && <span><b style={{ color: col }}>ttl </b>{point.ttl} <span style={{ opacity: 0.5 }}>(init≈{point.init_ttl})</span></span>}
+          {point.window     && <span><b style={{ color: col }}>win </b>{point.window}</span>}
+          {point.mss        && <span><b style={{ color: col }}>mss </b>{point.mss}</span>}
+          {point.df != null && <span><b style={{ color: col }}>df  </b>{point.df ? "1" : "0"}</span>}
+          {point.ssh_banner && <span style={{ width: "100%" }}><b style={{ color: col }}>ssh </b>{point.ssh_banner}</span>}
+          {point.via        && <span style={{ width: "100%" }}><b style={{ color: "#FF6F00" }}>via </b>{point.via}</span>}
+          {point.x_forwarded_for && <span style={{ width: "100%" }}><b style={{ color: "#FF6F00" }}>x-fwd </b>{point.x_forwarded_for}</span>}
+          {point.user_agent && <span style={{ width: "100%" }}><b style={{ color: col }}>ua  </b>{point.user_agent}</span>}
+
           <span><b style={{ color: col }}>geo </b>{lat.toFixed(4)}, {lng.toFixed(4)}</span>
           {point._ts        && <span style={{ opacity: 0.45 }}>{fmtTime(point._ts)}</span>}
         </div>

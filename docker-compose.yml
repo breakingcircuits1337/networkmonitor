@@ -136,6 +136,23 @@ services:
         condition: service_healthy
     network_mode: "host"
 
+  passive_fingerprint:
+    build:
+      context: .
+      dockerfile: ./sensors/passive_fingerprint/Dockerfile
+    container_name: passive_fingerprint
+    environment:
+      INTERFACE: "eth0"
+      KAFKA_BOOTSTRAP: "localhost:29092"
+      KAFKA_TOPIC: "fingerprint.events"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    network_mode: "host"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
   suricata:
     build:
       context: .
@@ -253,7 +270,7 @@ services:
       KAFKA_BOOTSTRAP: "kafka:9092"
       IN_TOPIC: "netflow"
       OUT_TOPIC: "geo.events"
-      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows"
+      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows,fingerprint.events"
       HTTP_PORT: 5000
       HOME_LAT: "38.9"
       HOME_LON: "-77.0"
