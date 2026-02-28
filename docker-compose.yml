@@ -313,8 +313,6 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
-    ports:
-      - "7000:7000"
     depends_on:
       kafka:
         condition: service_healthy
