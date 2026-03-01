@@ -99,6 +99,10 @@ def kafka_consumer_thread():
     geoip_db = get_env("GEOIP_DB", "/geoip/GeoLite2-City.mmdb")
     extra = get_env("EXTRA_TOPICS", "security.alerts,dpi.events")
     topics = [in_topic] + [t.strip() for t in extra.split(",") if t.strip()]
+    # New service topics — always included so globe receives threat intel / DNS / cred events
+    for _new_topic in ("ioc.feed", "dns.events", "credential.alerts"):
+        if _new_topic not in topics:
+            topics.append(_new_topic)
 
     group_id = "geoip-enricher"
     log_interval = 500
@@ -172,6 +176,12 @@ def kafka_consumer_thread():
                     event_type = "ai_analysis"
                 elif topic == "blocklist.actions":
                     event_type = "blocklist"
+                elif topic == "ioc.feed":
+                    event_type = "ioc"
+                elif topic == "dns.events":
+                    event_type = ev.get("event_type", "dns_event")
+                elif topic == "credential.alerts":
+                    event_type = ev.get("alert_type", "credential_alert")
                 else:
                     event_type = "other"
 
@@ -242,6 +252,29 @@ def kafka_consumer_thread():
                     for field in ("severity", "confidence", "threat_type",
                                   "summary", "recommendation", "source_topic"):
                         geo_event[field] = ev.get(field, "")
+
+                elif event_type == "ioc":
+                    src_ip    = ev.get("indicator", "") if ev.get("ioc_type") == "ip" else ""
+                    timestamp = ev.get("timestamp") or now_str
+                    for field in ("ioc_type", "indicator", "threat_type", "source",
+                                  "confidence", "suricata_rule"):
+                        geo_event[field] = ev.get(field, "")
+
+                elif event_type in ("dns_event", "dns_trace"):
+                    src_ip    = ev.get("src_ip", "")
+                    timestamp = ev.get("timestamp") or now_str
+                    for field in ("query", "is_dga", "dga_score", "is_rpz_hit",
+                                  "is_nxdomain", "nx_burst", "hops"):
+                        geo_event[field] = ev.get(field)
+
+                elif event_type in ("email_breach", "paste_exposure", "credential_alert"):
+                    src_ip    = ""
+                    timestamp = ev.get("timestamp") or now_str
+                    for field in ("email", "breach_name", "breach_date",
+                                  "data_classes", "severity", "alert_type"):
+                        geo_event[field] = ev.get(field, "")
+                    # Pin credential alerts to home coords
+                    country, lat, lon = _home_coords()
 
                 geo_event.update({
                     "src_ip":    src_ip,

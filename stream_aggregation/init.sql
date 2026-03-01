@@ -1,4 +1,6 @@
--- ksqlDB initialization script for alert correlation
+-- ksqlDB initialization script v2
+-- State stores are backed by RocksDB (KSQL_KSQL_STREAMS_STATE_DIR volume-mounted)
+-- so materialized tables survive container restarts.
 
 -- STREAM of asset discovery events
 CREATE STREAM asset_stream (
@@ -49,3 +51,58 @@ CREATE STREAM correlated_alerts WITH (KAFKA_TOPIC='alert.correlated', VALUE_FORM
   FROM ids_alerts_raw ia
   LEFT JOIN assets_by_ip a ON ia.src_ip = a.ip
   EMIT CHANGES;
+
+-- ── DNS events stream (v2) ────────────────────────────────────────────────────
+CREATE STREAM IF NOT EXISTS dns_events (
+  src_ip      VARCHAR,
+  query       VARCHAR,
+  query_type  INT,
+  is_response BOOLEAN,
+  is_nxdomain BOOLEAN,
+  is_dga      BOOLEAN,
+  dga_score   DOUBLE,
+  dga_reason  VARCHAR,
+  is_rpz_hit  BOOLEAN,
+  nx_burst    BOOLEAN,
+  timestamp   VARCHAR
+) WITH (
+  KAFKA_TOPIC='dns.events',
+  VALUE_FORMAT='JSON'
+);
+
+-- Materialized table of DGA/suspicious domains seen per source IP
+CREATE TABLE IF NOT EXISTS dga_by_src AS
+  SELECT src_ip,
+         COUNT(*) AS dga_count,
+         LATEST_BY_OFFSET(query) AS last_dga_domain,
+         LATEST_BY_OFFSET(dga_score) AS last_score
+  FROM dns_events
+  WHERE is_dga = TRUE
+  GROUP BY src_ip
+  EMIT CHANGES;
+
+-- ── IOC feed stream (v2) ──────────────────────────────────────────────────────
+CREATE STREAM IF NOT EXISTS ioc_feed (
+  ioc_type    VARCHAR,
+  indicator   VARCHAR,
+  threat_type VARCHAR,
+  source      VARCHAR,
+  confidence  DOUBLE,
+  timestamp   VARCHAR
+) WITH (
+  KAFKA_TOPIC='ioc.feed',
+  VALUE_FORMAT='JSON'
+);
+
+-- ── Credential alert stream (v2) ──────────────────────────────────────────────
+CREATE STREAM IF NOT EXISTS credential_alerts (
+  alert_type   VARCHAR,
+  email        VARCHAR,
+  breach_name  VARCHAR,
+  breach_date  VARCHAR,
+  severity     VARCHAR,
+  timestamp    VARCHAR
+) WITH (
+  KAFKA_TOPIC='credential.alerts',
+  VALUE_FORMAT='JSON'
+);

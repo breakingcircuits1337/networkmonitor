@@ -5,6 +5,8 @@ import Globe from "react-globe.gl";
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import SarahChatWidget from "./SarahChatWidget.jsx";
+import SettingsPage from "./SettingsPage.jsx";
+import ThreatIntelPanel from "./ThreatIntelPanel.jsx";
 
 // Role display metadata
 const ROLE_META = {
@@ -100,6 +102,13 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [roles,       setRoles]       = useState([]);
   const [viewMode,    setViewMode]    = useState("globe"); // "globe" or "map"
+  const [settingsOpen,    setSettingsOpen]    = useState(false);
+  const [threatIntelOpen, setThreatIntelOpen] = useState(false);
+
+  // IOC / DNS / Credential events routed to globe as alert points
+  const [iocEvents,  setIocEvents]  = useState([]);
+  const [dnsEvents,  setDnsEvents]  = useState([]);
+  const [credEvents, setCredEvents] = useState([]);
 
   // Globe size — needs explicit px for Three.js renderer
   const [globeW, setGlobeW] = useState(window.innerWidth);
@@ -159,6 +168,12 @@ export default function App() {
       push(setVoipEvents, MAX_ALERTS);
     } else if (topic === "ai.analysis") {
       push(setAiEvents, MAX_ALERTS);
+    } else if (topic === "ioc.feed" || eventType === "ioc") {
+      push(setIocEvents, MAX_ALERTS);
+    } else if (topic === "dns.events" || eventType === "dns_event" || eventType === "dns_trace") {
+      push(setDnsEvents, MAX_ALERTS);
+    } else if (topic === "credential.alerts" || eventType === "email_breach" || eventType === "paste_exposure") {
+      push(setCredEvents, MAX_ALERTS);
     }
 
     setTimelinePos(curr => Math.max(curr, ts));
@@ -203,6 +218,9 @@ export default function App() {
   const filteredDpi    = onGlobe(dpiEvents);
   const filteredVoip   = onGlobe(voipEvents);
   const filteredAi     = onGlobe(aiEvents);
+  const filteredIoc    = onGlobe(iocEvents);
+  const filteredDns    = onGlobe(dnsEvents);
+  const filteredCred   = onGlobe(credEvents);
   const aiCritical     = filteredAi.filter(
     a => a.severity === "critical" || a.severity === "high"
   ).length;
@@ -231,6 +249,10 @@ export default function App() {
     if (showDpi)  filteredDpi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#7c51a1",                              _r: 0.28 }));
     if (showVoip) filteredVoip.forEach(p => pts.push({ ...p, lng: toLng(p), _col: "#00BCD4",                              _r: 0.32 }));
     if (showAi)   filteredAi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: AI_SEV_COLOR[p.severity] || "#9E9E9E",  _r: 0.42 }));
+    // New layers
+    filteredIoc.forEach(p   => pts.push({ ...p, lng: toLng(p), _col: "#FF6F00", _r: 0.35 }));
+    filteredDns.forEach(p   => pts.push({ ...p, lng: toLng(p), _col: p.is_dga ? "#e53935" : "#00e676", _r: 0.30 }));
+    filteredCred.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#7b0000", _r: 0.45 }));
     return pts;
   }, [filteredIds, filteredDpi, filteredVoip, filteredAi, showIds, showDpi, showVoip, showAi]); // eslint-disable-line
 
@@ -444,6 +466,31 @@ export default function App() {
           >
             {viewMode === "globe" ? "2D MAP" : "3D GLOBE"}
           </button>
+          <button
+            onClick={() => setThreatIntelOpen(o => !o)}
+            title="Threat Intelligence Panel"
+            style={{
+              marginLeft: 6, padding: "4px 8px",
+              background: threatIntelOpen ? "rgba(229,57,53,0.2)" : "rgba(229,57,53,0.08)",
+              border: "1px solid rgba(229,57,53,0.35)",
+              borderRadius: 4, color: "#e53935", cursor: "pointer",
+              fontFamily: "'Share Tech Mono', monospace", fontSize: 10,
+            }}
+          >
+            🛡 INTEL
+          </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="Platform Settings"
+            style={{
+              marginLeft: 6, padding: "4px 8px",
+              background: "rgba(0,229,255,0.06)", border: "1px solid rgba(0,229,255,0.2)",
+              borderRadius: 4, color: "rgba(0,229,255,0.7)", cursor: "pointer",
+              fontFamily: "'Share Tech Mono', monospace", fontSize: 13,
+            }}
+          >
+            ⚙
+          </button>
         </div>
 
         {/* Centre: threat level */}
@@ -502,6 +549,12 @@ export default function App() {
         globeRef={globeRef}
         roles={roles}
       />
+
+      {/* ── Threat Intel Panel ───────────────────────────────────────────── */}
+      {threatIntelOpen && <ThreatIntelPanel onClose={() => setThreatIntelOpen(false)} />}
+
+      {/* ── Settings Modal ───────────────────────────────────────────────── */}
+      {settingsOpen && <SettingsPage onClose={() => setSettingsOpen(false)} />}
 
       {/* ── AI Chat widget ───────────────────────────────────────────────── */}
       <SarahChatWidget darkMode={true} />
@@ -763,9 +816,10 @@ function GlobeSidebar({
             ["#e53935", "IDS"],
             ["#7c51a1", "DPI"],
             ["#00BCD4", "VoIP"],
-            ["#FF6F00", "AI-med"],
-            ["#e53935", "AI-high"],
-            ["#7b0000", "AI-crit"],
+            ["#FF6F00", "AI-med / IOC"],
+            ["#e53935", "AI-high / DGA"],
+            ["#7b0000", "AI-crit / breach"],
+            ["#00e676", "DNS-clean"],
           ].map(([col, label]) => (
             <span key={label} style={{ color: "rgba(0,229,255,0.6)" }}>
               <span style={{ color: col }}>●</span> {label}
