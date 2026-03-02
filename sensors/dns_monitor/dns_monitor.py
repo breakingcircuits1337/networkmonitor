@@ -370,7 +370,7 @@ def _sniff_dns():
 
         except socket.timeout:
             continue
-        except Exception as e:
+        except (struct.error, OSError) as e:
             log.debug(f"Sniffer error: {e}")
             time.sleep(0.1)
 

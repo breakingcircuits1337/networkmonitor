@@ -335,7 +335,7 @@ def _fetch_misp():
         log.info(f"MISP: processed {count} attributes")
         if count:
             _flush_rules()
-    except Exception as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.warning(f"MISP fetch error: {e}")
 
 

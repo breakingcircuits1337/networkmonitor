@@ -241,7 +241,7 @@ def _monitor_loop():
     while True:
         try:
             _check_all_emails()
-        except Exception as e:
+        except (requests.exceptions.RequestException, OSError) as e:
             log.error(f"Monitor loop error: {e}")
         time.sleep(CHECK_INTERVAL)
 
