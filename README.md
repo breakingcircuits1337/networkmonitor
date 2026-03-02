@@ -126,7 +126,33 @@ Open `http://localhost:8080`, click **⚙** in the top bar, then add your:
 
 ## Observability & Monitoring Stack
 
-The monitoring stack is an optional Docker Compose overlay that adds Prometheus metrics collection, Grafana dashboards, Alertmanager routing, KMinion Kafka lag tracking, node-exporter (host metrics), and cAdvisor (container metrics).
+An optional Docker Compose overlay (`docker-compose.monitoring.yml`) that adds full metrics collection, dashboards, and alerting to the NetworkMonitor platform.
+
+**No extra downloads required.** All components are standard Docker images pulled automatically on first run. No agents, plugins, or SDKs need to be installed on the host.
+
+### Components pulled automatically
+
+| Image | Version | Role |
+|-------|---------|------|
+| `redpandadata/kminion` | latest | Kafka consumer lag + broker metrics |
+| `prom/prometheus` | v2.51.0 | Metrics store (30-day TSDB retention) |
+| `grafana/grafana` | 10.4.0 | Dashboard UI |
+| `prom/alertmanager` | v0.27.0 | Alert routing |
+| `prom/node-exporter` | v1.8.0 | Host CPU / memory / disk metrics |
+| `gcr.io/cadvisor/cadvisor` | v0.49.1 | Per-container resource metrics |
+
+### Required configuration (one step)
+
+Set `GRAFANA_PASSWORD` in your `.env` file before starting:
+
+```bash
+# in .env
+GRAFANA_PASSWORD=your_secure_password_here
+```
+
+That is the only required change. Everything else starts with working defaults.
+
+> **Port availability**: the overlay uses ports 3000, 8082, 8083, 9090, 9093, and 9100. Make sure these are free on the host before starting.
 
 ### Start the monitoring stack
 
@@ -136,42 +162,60 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 ### Access
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Prometheus | http://localhost:9090 | Metrics store + PromQL query UI |
-| Grafana | http://localhost:3000 | Dashboards (admin / `GRAFANA_PASSWORD`) |
-| Alertmanager | http://localhost:9093 | Alert routing |
-| KMinion | http://localhost:8082/metrics | Kafka lag + broker metrics |
-| node-exporter | http://localhost:9100/metrics | Host CPU/memory/disk metrics |
-| cAdvisor | http://localhost:8083/metrics | Per-container resource metrics |
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Grafana dashboards | http://localhost:3000 | `admin` / `GRAFANA_PASSWORD` |
+| Prometheus (PromQL) | http://localhost:9090 | none |
+| Alertmanager | http://localhost:9093 | none |
+| KMinion raw metrics | http://localhost:8082/metrics | none |
+| node-exporter raw metrics | http://localhost:9100/metrics | none |
+| cAdvisor raw metrics | http://localhost:8083/metrics | none |
 
-### Pre-provisioned dashboards
+### Are the Grafana dashboards pre-configured?
 
-| Dashboard | Description |
-|-----------|-------------|
-| **Kafka Consumer Lag** | Per-group/topic/partition lag, lag growth rate, high-water marks |
-| **Docker Container Overview** | CPU, memory, network per container, uptime check |
+**Yes — fully.** On first boot Grafana automatically:
 
-To import additional community dashboards visit [grafana.com/grafana/dashboards](https://grafana.com/grafana/dashboards) and use IDs:
-- **14013** — KMinion Topics
-- **18136** — Kafka Consumer Offsets
-- **11963** — Kafka Lag
+1. Connects to Prometheus (the datasource is provisioned from `monitoring/grafana/provisioning/datasources/prometheus.yml` — no manual setup in the UI needed).
+2. Loads two dashboards from `monitoring/grafana/dashboards/` into a **NetworkMonitor** folder:
 
-### Alerting rules
+| Dashboard | Panels |
+|-----------|--------|
+| **Kafka Consumer Lag** | Total lag by consumer group · Lag growth rate · Per-partition lag table · Topic high-water marks · Broker log-dir size |
+| **Docker Container Overview** | CPU per container · Memory working-set · Network RX/TX rate · Seconds-since-last-seen uptime table |
 
-Prometheus alerting rules are in `monitoring/prometheus/rules/kafka-alerts.yml` and cover:
+Both dashboards have drop-down filters for consumer group, topic, and container name that populate automatically from live label data — nothing needs to be edited.
 
-- `KafkaConsumerLagWarning` — lag > 5,000 messages for 5 min
-- `KafkaConsumerLagCritical` — lag > 50,000 messages for 5 min
-- `KafkaConsumerLagGrowing` — lag steadily increasing
-- `ContainerDown` — container not seen for > 30 s
-- `ContainerHighMemory` — > 85% memory limit for 5 min
-- `ContainerHighCPU` — > 80% CPU for 10 min
-- `HostHighLoad`, `HostLowDiskSpace`, `HostMemoryPressure`
+To import additional community dashboards, go to **Dashboards → Import** in the Grafana UI and enter one of these IDs:
 
-To add Slack/PagerDuty notifications, edit `monitoring/alertmanager/alertmanager.yml` and set `GRAFANA_PASSWORD` in `.env`.
+| ID | Description |
+|----|-------------|
+| 14013 | KMinion Topics (official) |
+| 18136 | Kafka Consumer Offsets |
+| 11963 | Kafka Lag |
 
-### Force Prometheus to reload rules without restart
+### Alerting rules (active out of the box)
+
+Rules live in `monitoring/prometheus/rules/kafka-alerts.yml` and fire into Alertmanager automatically.
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| `KafkaConsumerLagWarning` | Lag > 5,000 messages for 5 min | warning |
+| `KafkaConsumerLagCritical` | Lag > 50,000 messages for 5 min | critical |
+| `KafkaConsumerLagGrowing` | Lag steadily increasing for 15 min | warning |
+| `ContainerDown` | Container not seen for > 30 s | critical |
+| `ContainerHighMemory` | > 85% memory limit for 5 min | warning |
+| `ContainerHighCPU` | > 80% CPU for 10 min | warning |
+| `HostHighLoad` | Load avg > 1.5× CPU count for 10 min | warning |
+| `HostLowDiskSpace` | Root FS < 10% free for 5 min | critical |
+| `HostMemoryPressure` | Available RAM < 10% for 5 min | critical |
+
+By default alerts are logged by Alertmanager. To route them to **Slack or PagerDuty**, uncomment and fill in the receiver block in `monitoring/alertmanager/alertmanager.yml` — no restart needed, just reload:
+
+```bash
+curl -X POST http://localhost:9093/-/reload
+```
+
+To reload Prometheus rules without a restart:
 
 ```bash
 curl -X POST http://localhost:9090/-/reload
@@ -182,18 +226,20 @@ curl -X POST http://localhost:9090/-/reload
 ```
 monitoring/
 ├── prometheus/
-│   ├── prometheus.yml          # Scrape config (Kafka, containers, host, services)
+│   ├── prometheus.yml              # Scrape targets: KMinion, cAdvisor, node-exporter, services
 │   └── rules/
-│       └── kafka-alerts.yml    # Alerting rules
+│       └── kafka-alerts.yml        # All alerting rules
 ├── alertmanager/
-│   └── alertmanager.yml        # Alert routing (add Slack/PD here)
+│   └── alertmanager.yml            # Alert routing — add Slack/PagerDuty receivers here
 └── grafana/
     ├── provisioning/
-    │   ├── datasources/prometheus.yml
-    │   └── dashboards/default.yml
+    │   ├── datasources/
+    │   │   └── prometheus.yml      # Auto-connects Grafana → Prometheus
+    │   └── dashboards/
+    │       └── default.yml         # Tells Grafana where to load dashboard JSON from
     └── dashboards/
-        ├── kafka-consumer-lag.json
-        └── docker-overview.json
+        ├── kafka-consumer-lag.json # Kafka lag dashboard
+        └── docker-overview.json    # Container resource dashboard
 ```
 
 ---
@@ -220,6 +266,7 @@ Copy `.env.template` → `.env` and fill in values. Key variables:
 | `ENABLE_PACKET_LAUNCHER` | `false` | Manual packet TX (lab only) |
 | `ENABLE_EPHEMERAL_TRACER` | `false` | Active traceroute with spoofed headers |
 | `REDIS_URL` | `redis://redis:6379/0` | Redis for persistent blocklist |
+| `GRAFANA_PASSWORD` | _(required for monitoring)_ | Grafana `admin` account password |
 
 ---
 
