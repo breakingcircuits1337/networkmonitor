@@ -61,16 +61,18 @@ def launch_worker(ip, proto, size, rate, count):
 def launch():
     if not ENABLE:
         return jsonify({"error": "Packet launching is disabled."}), 403
-    if LAUNCH_TOKEN:
-        if request.headers.get("X-Token") != LAUNCH_TOKEN:
-            return jsonify({"error": "Invalid token"}), 403
+    if not LAUNCH_TOKEN or request.headers.get("X-Token") != LAUNCH_TOKEN:
+        return jsonify({"error": "Invalid token"}), 403
     try:
         data = request.get_json(force=True)
         ip = data.get("ip", "")
         proto = data.get("protocol", "").upper()
-        size = int(data.get("size", 64))
-        rate = int(data.get("rate", 1))
-        count = int(data.get("count", 1))
+        try:
+            size = int(data.get("size", 64))
+            rate = int(data.get("rate", 1))
+            count = int(data.get("count", 1))
+        except (TypeError, ValueError):
+            return jsonify({"error": "size, rate, and count must be integers"}), 400
         # Basic validations
         if proto not in ("ICMP", "UDP", "TCP"):
             return jsonify({"error": "Protocol must be ICMP, UDP, or TCP"}), 400
@@ -109,14 +111,16 @@ def launch():
 def trace():
     if not ENABLE:
         return jsonify({"error": "Packet launching is disabled."}), 403
-    if LAUNCH_TOKEN:
-        if request.headers.get("X-Token") != LAUNCH_TOKEN:
-            return jsonify({"error": "Invalid token"}), 403
+    if not LAUNCH_TOKEN or request.headers.get("X-Token") != LAUNCH_TOKEN:
+        return jsonify({"error": "Invalid token"}), 403
     try:
         data = request.get_json(force=True)
         ip = data.get("ip", "")
-        max_ttl = int(data.get("max_ttl", 30))
-        timeout = float(data.get("timeout", 1.0))
+        try:
+            max_ttl = int(data.get("max_ttl", 30))
+            timeout = float(data.get("timeout", 1.0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "max_ttl must be an integer and timeout must be a number"}), 400
 
         # Validate IP
         if not ip or len(ip) > 50:

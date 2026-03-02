@@ -16,12 +16,15 @@ Security design:
 """
 
 import base64
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -92,11 +95,24 @@ def _check_internal_token():
     """Return a 401 response tuple if X-Internal-Token is missing/wrong, else None."""
     expected = os.getenv("INTERNAL_API_TOKEN", "")
     if not expected:
-        return None  # token enforcement disabled (dev mode)
+        return jsonify({"error": "Unauthorized"}), 401
     token = request.headers.get("X-Internal-Token", "")
     if token != expected:
         return jsonify({"error": "Unauthorized"}), 401
     return None
+
+
+def _is_ssrf_safe(url: str) -> bool:
+    """Return False if the URL resolves to a private/loopback address."""
+    try:
+        host = urlparse(url).hostname
+        if not host:
+            return False
+        addr = socket.gethostbyname(host)
+        ip = ipaddress.ip_address(addr)
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local)
+    except Exception:
+        return False
 
 
 # ── Encrypted store ───────────────────────────────────────────────────────────
@@ -244,6 +260,8 @@ def test_connection(service):
             return jsonify({"ok": False, "error": "MISP URL and API key required"})
         if not _URL_RE.match(url):
             return jsonify({"ok": False, "error": "Stored MISP URL is invalid"}), 400
+        if not _is_ssrf_safe(url):
+            return jsonify({"ok": False, "error": "MISP URL must resolve to a public address"}), 400
         try:
             r = req.get(f"{url}/servers/getVersion",
                         headers={"Authorization": key, "Accept": "application/json"},

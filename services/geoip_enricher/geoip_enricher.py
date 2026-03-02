@@ -296,7 +296,7 @@ def kafka_consumer_thread():
                     dst_ip    = ev.get("dst_ip", "")
                     timestamp = ev.get("timestamp") or now_str
                     geo_event["dst_ip"] = dst_ip
-                    for field in ("fp_subtype", "os_guess", "os_confidence",
+                    for field in ("os_guess", "os_confidence",
                                   "ttl", "init_ttl", "window", "df",
                                   "mss", "window_scale", "tcp_options",
                                   "ssh_banner", "via", "x_forwarded_for",

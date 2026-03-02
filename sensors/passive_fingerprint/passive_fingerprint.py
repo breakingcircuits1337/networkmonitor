@@ -201,8 +201,8 @@ def process_pkt(pkt):
                         "dst_port":   tcp.dport,
                         "ssh_banner": banner[:200],
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"SSH banner parse error: {e}")
 
         # 3 ── HTTP proxy-header detection ─────────────────────────────────────
         if tcp.dport in (80, 8080, 3128, 8888) and pkt.haslayer(Raw):
