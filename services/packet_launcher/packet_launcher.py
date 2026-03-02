@@ -1,9 +1,10 @@
 import os
 import time
 import logging
+import ipaddress
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from scapy.all import IP, ICMP, UDP, TCP, Raw, send, RandShort
+from scapy.all import IP, ICMP, UDP, TCP, Raw, send, sr1, RandShort
 from common.config import get_env
 import threading
 import json
@@ -104,12 +105,66 @@ def launch():
         logger.exception(f"Error in /launch: {e}")
         return jsonify({"error": str(e)}), 400
 
+@app.route("/trace", methods=["POST"])
+def trace():
+    if not ENABLE:
+        return jsonify({"error": "Packet launching is disabled."}), 403
+    if LAUNCH_TOKEN:
+        if request.headers.get("X-Token") != LAUNCH_TOKEN:
+            return jsonify({"error": "Invalid token"}), 403
+    try:
+        data = request.get_json(force=True)
+        ip = data.get("ip", "")
+        max_ttl = int(data.get("max_ttl", 30))
+        timeout = float(data.get("timeout", 1.0))
+
+        # Validate IP
+        if not ip or len(ip) > 50:
+            return jsonify({"error": "Invalid IP"}), 400
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({"error": "Invalid IP address format"}), 400
+
+        if not (1 <= max_ttl <= 64):
+            return jsonify({"error": "max_ttl must be 1-64"}), 400
+        if not (0.1 <= timeout <= 5.0):
+            return jsonify({"error": "timeout must be 0.1-5.0 seconds"}), 400
+
+        hops = []
+        for ttl in range(1, max_ttl + 1):
+            t_start = time.time()
+            pkt = IP(dst=ip, ttl=ttl) / ICMP()
+            reply = sr1(pkt, timeout=timeout, verbose=False)
+            rtt_ms = round((time.time() - t_start) * 1000, 2)
+
+            if reply is None:
+                hops.append({"hop": ttl, "ip": "*", "rtt_ms": None})
+            elif reply.haslayer(ICMP):
+                hop_ip = reply.src
+                icmp_type = reply[ICMP].type
+                hops.append({"hop": ttl, "ip": hop_ip, "rtt_ms": rtt_ms})
+                if icmp_type == 0:  # echo reply — reached destination
+                    break
+                # type 11 = TTL exceeded, continue to next hop
+            else:
+                hops.append({"hop": ttl, "ip": reply.src, "rtt_ms": rtt_ms})
+                if reply.src == ip:
+                    break
+
+        logger.info(f"Trace to {ip}: {len(hops)} hops")
+        return jsonify({"target": ip, "hops": hops}), 200
+    except Exception as e:
+        logger.exception(f"Error in /trace: {e}")
+        return jsonify({"error": str(e)}), 400
+
+
 @app.route("/")
 def index():
     return jsonify({
         "service": "packet_launcher",
         "enabled": ENABLE,
-        "usage": "POST /launch {ip,protocol,size,rate,count} (see README)"
+        "usage": "POST /launch {ip,protocol,size,rate,count} | POST /trace {ip,max_ttl,timeout} (see README)"
     })
 
 if __name__ == "__main__":
