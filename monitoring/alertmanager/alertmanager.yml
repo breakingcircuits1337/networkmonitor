@@ -1,0 +1,45 @@
+global:
+  resolve_timeout: 5m
+
+# Templates directory (optional — add .tmpl files here for custom formatting)
+# templates:
+#   - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: default-log
+  group_by: [alertname, severity, project]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: default-log
+      repeat_interval: 1h
+
+receivers:
+  # Default: log only. Replace with Slack/PagerDuty/email as needed.
+  # Example Slack config (uncomment and set SLACK_WEBHOOK in .env):
+  #
+  # - name: slack-alerts
+  #   slack_configs:
+  #     - api_url: "${SLACK_WEBHOOK}"
+  #       channel: "#networkmonitor-alerts"
+  #       send_resolved: true
+  #       title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+  #       text: >-
+  #         {{ range .Alerts }}
+  #         *Description:* {{ .Annotations.description }}
+  #         *Severity:* {{ .Labels.severity }}
+  #         {{ end }}
+
+  - name: default-log
+    # Alertmanager always logs firing/resolved; no external config needed for basic use.
+
+inhibit_rules:
+  # Suppress container-level alerts when the container is already flagged as down
+  - source_match:
+      alertname: ContainerDown
+    target_match_re:
+      alertname: ContainerHighCPU|ContainerHighMemory
+    equal: [name]

@@ -1,0 +1,98 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: networkmonitor
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  - job_name: node-exporter
+    scrape_interval: 10s
+    static_configs:
+      - targets: [node-exporter:9100]
+
+  - job_name: cadvisor
+    scrape_interval: 10s
+    static_configs:
+      - targets: [cadvisor:8080]
+
+  - job_name: kminion
+    scrape_interval: 30s
+    static_configs:
+      - targets: [kminion:8082]
+
+  # NetworkMonitor Python services — each with a per-service label for Grafana filtering
+  - job_name: networkmonitor-geoip-enricher
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [geoip_enricher:5000]
+        labels:
+          service: geoip_enricher
+          project: networkmonitor
+
+  - job_name: networkmonitor-ai-analyst
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [ai_analyst:5001]
+        labels:
+          service: ai_analyst
+          project: networkmonitor
+
+  - job_name: networkmonitor-settings-api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [settings_api:5002]
+        labels:
+          service: settings_api
+          project: networkmonitor
+
+  - job_name: networkmonitor-threat-intel
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [threat_intel:5003]
+        labels:
+          service: threat_intel
+          project: networkmonitor
+
+  - job_name: networkmonitor-credential-monitor
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [credential_monitor:5004]
+        labels:
+          service: credential_monitor
+          project: networkmonitor
+
+  - job_name: networkmonitor-dns-monitor
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [dns_monitor:5005]
+        labels:
+          service: dns_monitor
+          project: networkmonitor
+
+  - job_name: networkmonitor-sarah-api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [sarah_api:5000]
+        labels:
+          service: sarah_api
+          project: networkmonitor

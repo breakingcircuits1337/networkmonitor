@@ -12,6 +12,35 @@ import requests
 from kafka import KafkaConsumer, KafkaProducer
 from common.config import get_env
 
+# ── Redis persistence (optional — falls back to in-memory if unavailable) ─────
+# Redis persists the blocked-IP set and alert rate counters across container
+# restarts, eliminating the previous in-memory-only limitation.
+# Post-quantum note: Redis connection should use TLS (rediss://) in production.
+try:
+    import redis as _redis_lib
+    _REDIS_AVAILABLE_MODULE = True
+except ImportError:
+    _REDIS_AVAILABLE_MODULE = False
+
+_redis: "redis.Redis | None" = None  # type: ignore
+_redis_ok = False
+
+
+def _init_redis(url: str):
+    global _redis, _redis_ok
+    if not _REDIS_AVAILABLE_MODULE:
+        logger.warning("redis-py not installed — using in-memory blocklist (install redis>=5)")
+        return
+    try:
+        _redis = _redis_lib.from_url(url, socket_timeout=2, socket_connect_timeout=2,
+                                     decode_responses=True)
+        _redis.ping()
+        _redis_ok = True
+        logger.info(f"Redis connected: {url} — blocklist will persist across restarts")
+    except Exception as e:
+        _redis_ok = False
+        logger.warning(f"Redis unavailable ({e}) — falling back to in-memory blocklist")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -110,8 +139,12 @@ def is_trusted_ip(ip: str, trusted_ips: set, trusted_nets: list) -> bool:
 # corrected without manual intervention.  TTL-based unblocking lets the
 # system re-evaluate an IP after a configurable cooling period.
 # ---------------------------------------------------------------------------
-_block_expiry: dict = {}   # { ip: expiry_timestamp }
+_block_expiry: dict = {}   # in-memory fallback { ip: expiry_timestamp }
 _block_lock = threading.Lock()
+
+_REDIS_BLOCKED_SET  = "netwatch:blocked_ips"
+_REDIS_BLOCK_PREFIX = "netwatch:block:"
+_REDIS_ALERT_PREFIX = "netwatch:alert_count:"
 
 
 def _do_unblock(ip: str, unblock_cmd_template: str, ttl_sec: int):
@@ -124,12 +157,26 @@ def _do_unblock(ip: str, unblock_cmd_template: str, ttl_sec: int):
         logger.info(f"Auto-unblocked {ip} after TTL={ttl_sec}s")
     except Exception as e:
         logger.warning(f"Unblock command failed for {ip}: {e}")
+    # Remove from persistent store
+    if _redis_ok and _redis:
+        try:
+            _redis.srem(_REDIS_BLOCKED_SET, ip)
+            _redis.delete(f"{_REDIS_BLOCK_PREFIX}{ip}")
+        except Exception:
+            pass
     with _block_lock:
         _block_expiry.pop(ip, None)
 
 
 def schedule_unblock(ip: str, unblock_cmd_template: str, ttl_sec: int):
-    """Schedule iptables rule removal after ttl_sec seconds."""
+    """Schedule iptables rule removal after ttl_sec seconds.
+    Redis SETEX provides persistence across restarts.
+    """
+    if _redis_ok and _redis:
+        try:
+            _redis.setex(f"{_REDIS_BLOCK_PREFIX}{ip}", ttl_sec, "1")
+        except Exception as e:
+            logger.warning(f"Redis setex failed for {ip}: {e}")
     with _block_lock:
         _block_expiry[ip] = now() + ttl_sec
     t = threading.Timer(ttl_sec, _do_unblock, args=(ip, unblock_cmd_template, ttl_sec))
@@ -138,12 +185,51 @@ def schedule_unblock(ip: str, unblock_cmd_template: str, ttl_sec: int):
 
 
 def is_block_active(ip: str) -> bool:
-    """Return True if ip has an active (non-expired) TTL block entry."""
+    """Return True if ip has an active (non-expired) block entry.
+    Checks Redis first (persisted state) then in-memory fallback.
+    """
+    if _redis_ok and _redis:
+        try:
+            return bool(_redis.exists(f"{_REDIS_BLOCK_PREFIX}{ip}"))
+        except Exception:
+            pass
     with _block_lock:
         exp = _block_expiry.get(ip)
     if exp is None:
         return False
     return now() < exp
+
+
+def mark_blocked_persistent(ip: str):
+    """Record ip in the persistent Redis blocked set."""
+    if _redis_ok and _redis:
+        try:
+            _redis.sadd(_REDIS_BLOCKED_SET, ip)
+        except Exception as e:
+            logger.warning(f"Redis sadd failed for {ip}: {e}")
+
+
+def is_blocked_persistent(ip: str) -> bool:
+    """Check Redis blocked set (survives restarts even without TTL key)."""
+    if _redis_ok and _redis:
+        try:
+            return bool(_redis.sismember(_REDIS_BLOCKED_SET, ip))
+        except Exception:
+            pass
+    return False
+
+
+def load_persisted_blocks() -> set:
+    """On startup, re-hydrate the in-memory blocked set from Redis."""
+    if _redis_ok and _redis:
+        try:
+            members = _redis.smembers(_REDIS_BLOCKED_SET)
+            if members:
+                logger.info(f"Loaded {len(members)} persisted blocks from Redis")
+            return set(members)
+        except Exception as e:
+            logger.warning(f"Failed to load persisted blocks: {e}")
+    return set()
 
 
 # ---------------------------------------------------------------------------
@@ -199,24 +285,37 @@ def execute_block(ip: str, ingress_cmd_template: str, egress_cmd_template,
 # from noisy signatures and prevents one-shot alert injection from
 # triggering blocks.
 # ---------------------------------------------------------------------------
-_alert_counts: dict = {}   # { ip: (count, window_start) }
+_alert_counts: dict = {}   # in-memory fallback { ip: (count, window_start) }
 
 
 def alert_rate_check(ip: str, min_alerts: int, window_sec: int) -> bool:
     """
     Return True once ip has triggered >= min_alerts within window_sec.
-    Resets the counter when the window rolls over.
+    Uses Redis INCR+EXPIRE for atomic, persistent counting when available.
+    Falls back to in-memory dict when Redis is unavailable.
     """
+    if _redis_ok and _redis:
+        try:
+            key = f"{_REDIS_ALERT_PREFIX}{ip}"
+            count = _redis.incr(key)
+            if count == 1:
+                _redis.expire(key, window_sec)   # sliding window via TTL
+            if count < min_alerts:
+                logger.debug(f"Rate-limit hold (redis) for {ip}: {count}/{min_alerts}")
+                return False
+            return True
+        except Exception as e:
+            logger.warning(f"Redis rate-check failed for {ip}: {e}")
+            # fall through to in-memory
+
     n = now()
     count, start = _alert_counts.get(ip, (0, n))
     if n - start > window_sec:
-        count, start = 0, n   # window expired — reset
+        count, start = 0, n
     count += 1
     _alert_counts[ip] = (count, start)
     if count < min_alerts:
-        logger.debug(
-            f"Rate-limit hold for {ip}: {count}/{min_alerts} alerts in {window_sec}s window"
-        )
+        logger.debug(f"Rate-limit hold (mem) for {ip}: {count}/{min_alerts}")
         return False
     return True
 
@@ -397,6 +496,10 @@ def should_block(
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    # Initialise Redis persistence (optional)
+    redis_url = get_env("REDIS_URL", "redis://redis:6379/0")
+    _init_redis(redis_url)
+
     kafka_bootstrap    = get_env("KAFKA_BOOTSTRAP",       "kafka:9092")
     ids_topic          = get_env("IDS_TOPIC",             "security.alerts")
     ueba_topic         = get_env("UEBA_TOPIC",            "ueba.alerts")
@@ -443,7 +546,7 @@ def main():
 
     blocklist_topic = "blocklist.actions"
     anomaly_scores  = {}   # { ip: (score, expiry_ts) }
-    blocked         = set()
+    blocked         = load_persisted_blocks()   # re-hydrate from Redis on startup
     ttl_sec         = 600
 
     logger.info(
@@ -590,6 +693,7 @@ def main():
                     f"llm_reason={llm_result.get('reason', 'N/A')}"
                 )
                 blocked.add(src_ip)
+                mark_blocked_persistent(src_ip)  # persist to Redis
 
                 # Publish audit event
                 audit = {

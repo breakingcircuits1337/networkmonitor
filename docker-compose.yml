@@ -1,21 +1,73 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# NetworkMonitor v2 — docker-compose.yml
+#
+# Security architecture:
+#   sensor-net    → raw capture containers (host-mode where required)
+#   processing-net → Kafka, ksqlDB, AI services (internal, no external access)
+#   storage-net   → Neo4j, Redis (internal only)
+#   frontend-net  → UI, geoip_enricher, new APIs (reach processing-net read-only)
+#
+# Post-quantum TLS roadmap:
+#   Phase 1 (now)  : TLS 1.3 on all external listeners, AES-256 key storage
+#   Phase 2 (soon) : Kafka SASL_SSL with TLS 1.3 (enable KAFKA_SSL_* vars)
+#   Phase 3 (future): X25519Kyber768 cipher suite when Java/Confluent supports it
+#
+# Copy .env.template → .env and fill in secrets before running.
+# ══════════════════════════════════════════════════════════════════════════════
+
+networks:
+  sensor-net:
+    driver: bridge
+    # Sensors that need host-mode bypass this network; others use it for Kafka access
+  processing-net:
+    driver: bridge
+    internal: true    # No direct internet access — Kafka/AI tier
+  storage-net:
+    driver: bridge
+    internal: true    # Neo4j + Redis — most restricted tier
+  frontend-net:
+    driver: bridge    # UI + enricher — can reach processing-net services
+
+volumes:
+  neo4j_data:
+  kafka_data:         # Persistent Kafka log storage — survives container restarts
+  suricata_logs:
+  zeek_logs:
+  voip_captures:
+  ollama_data:
+  redis_data:         # Persistent Redis RDB/AOF for blocklist durability
+  ksqldb_state:       # RocksDB state store for ksqlDB stream processing
+  settings_data:      # Encrypted settings file (AES-256)
+  ioc_rules:          # Auto-generated Suricata IOC rules from threat_intel
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    # No external port exposure — accessed only by Kafka
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: kafka
+    restart: unless-stopped
     depends_on:
       - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # PLAINTEXT for internal Docker network; HOST listener for host-mode sensors
       KAFKA_LISTENERS: PLAINTEXT://kafka:9092,HOST://0.0.0.0:29092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
@@ -23,19 +75,32 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Longer retention for state recovery on restart
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "29092:29092"    # Host-mode sensors use this
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - processing-net
+      - sensor-net
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
 
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
     container_name: schema-registry
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -43,14 +108,51 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
       SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
-    ports:
-      - "8081:8081"
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ── Persistent blocklist store (NEW) ─────────────────────────────────────────
+  # Redis replaces the previous in-memory blocklist in soar_blocker.
+  # AOF + RDB persistence means blocks survive container restarts.
+  # Post-quantum: use rediss:// (TLS) with REDIS_URL when terminating at HAProxy+TLS 1.3.
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - storage-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384M
 
   neo4j:
     image: neo4j:5-enterprise
     container_name: neo4j
+    restart: unless-stopped
     environment:
-      NEO4J_AUTH: neo4j/neo4jpassword
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-CHANGE_ME}
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 2G
@@ -60,114 +162,43 @@ services:
       - "0.0.0.0:7687:7687"
     volumes:
       - neo4j_data:/data
+    networks:
+      - storage-net
+      - processing-net
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p neo4jpassword 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-CHANGE_ME} 'RETURN 1' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
 
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
+    restart: unless-stopped
     ports:
       - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
       OLLAMA_HOST: "0.0.0.0"
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 16G
 
-  asset_discovery:
-    build:
-      context: .
-      dockerfile: ./sensors/asset_discovery/Dockerfile
-    container_name: asset_discovery
-    environment:
-      NETWORK_RANGE: "192.168.1.0/24"
-      SCAN_INTERVAL_SECONDS: 300
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "asset.discovery"
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  topology_updater:
-    build:
-      context: .
-      dockerfile: ./services/topology_updater/Dockerfile
-    container_name: topology_updater
-    environment:
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "asset.discovery"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "neo4j"
-      NEO4J_PASSWORD: "neo4jpassword"
-    depends_on:
-      kafka:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-
-  traffic_analysis:
-    build:
-      context: .
-      dockerfile: ./sensors/traffic_analysis/Dockerfile
-    container_name: traffic_analysis
-    environment:
-      INTERFACE: "eth0"
-      FLOW_WINDOW_SECONDS: 30
-      KAFKA_BOOTSTRAP: "localhost:29092"
-      KAFKA_TOPIC: "netflow"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    network_mode: "host"
-
-  encrypted_traffic_analysis:
-    build:
-      context: .
-      dockerfile: ./sensors/encrypted_traffic_analysis/Dockerfile
-    container_name: encrypted_traffic_analysis
-    environment:
-      INTERFACE: "eth0"
-      KAFKA_BOOTSTRAP: "localhost:29092"
-      KAFKA_TOPIC: "tls.meta"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    network_mode: "host"
-
-  suricata:
-    build:
-      context: .
-      dockerfile: ./sensors/suricata_custom/Dockerfile
-    container_name: suricata
-    network_mode: "host"
-    command: ["-c", "/etc/suricata/suricata.yaml", "-i", "eth0", "--init-errors-fatal"]
-    environment:
-      ET_PRO_API_KEY: ${ET_PRO_API_KEY:-}
-    volumes:
-      - suricata_logs:/var/log/suricata
-
-  ids_alert_forwarder:
-    build:
-      context: .
-      dockerfile: ./sensors/ids_alert_forwarder/Dockerfile
-    container_name: ids_alert_forwarder
-    environment:
-      EVE_FILE: "/var/log/suricata/eve.json"
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "security.alerts"
-    volumes:
-      - suricata_logs:/var/log/suricata:ro
-    depends_on:
-      kafka:
-        condition: service_healthy
-      suricata:
-        condition: service_started
-
+  # ── Stream processing ─────────────────────────────────────────────────────────
   ksqldb-server:
     image: confluentinc/ksqldb-server:0.29.0
     container_name: ksqldb-server
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -178,12 +209,25 @@ services:
       KSQL_BOOTSTRAP_SERVERS: "kafka:9092"
       KSQL_LISTENERS: "http://0.0.0.0:8088"
       KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      # Persistent RocksDB state — survives restarts
+      KSQL_KSQL_STREAMS_STATE_DIR: "/var/lib/kafka-streams"
+      KSQL_KSQL_PROCESSING_GUARANTEE: "at_least_once"
     ports:
       - "8088:8088"
+    volumes:
+      - ksqldb_state:/var/lib/kafka-streams
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   ksqldb-cli:
     image: confluentinc/ksqldb-cli:0.29.0
     container_name: ksqldb-cli
+    restart: on-failure
     depends_on:
       ksqldb-server:
         condition: service_started
@@ -199,39 +243,286 @@ services:
         tail -f /dev/null
     volumes:
       - ./stream_aggregation/init.sql:/init.sql:ro
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
-  alert_sink_neo4j:
+  # ── Encrypted Settings API (NEW) ──────────────────────────────────────────────
+  settings_api:
     build:
       context: .
-      dockerfile: ./services/alert_sink_neo4j/Dockerfile
-    container_name: alert_sink_neo4j
+      dockerfile: ./services/settings_api/Dockerfile
+    container_name: settings_api
+    restart: unless-stopped
+    environment:
+      SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:-CHANGE_ME}"
+      INTERNAL_API_TOKEN: "${INTERNAL_API_TOKEN:-}"
+      SETTINGS_FILE: "/data/settings.enc"
+    volumes:
+      - settings_data:/data
+    networks:
+      - frontend-net
+      - processing-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    # Not exposed externally — accessed via nginx proxy
+
+  # ── Threat Intelligence Aggregator (NEW) ──────────────────────────────────────
+  threat_intel:
+    build:
+      context: .
+      dockerfile: ./services/threat_intel/Dockerfile
+    container_name: threat_intel
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "alert.correlated"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "neo4j"
-      NEO4J_PASSWORD: "neo4jpassword"
+      SETTINGS_API_URL: "http://settings_api:5002"
+      INTERNAL_API_TOKEN: "${INTERNAL_API_TOKEN:-}"
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-aratan/Ministral-3-14B-Reasoning-2512:latest}"
+      OTX_API_KEY: "${OTX_API_KEY:-}"
+      MISP_URL: "${MISP_URL:-}"
+      MISP_API_KEY: "${MISP_API_KEY:-}"
+      POLL_OTX_SECS: "900"
+      POLL_CISA_SECS: "3600"
+      POLL_MISP_SECS: "1800"
+      SURICATA_CUSTOM_RULES: "/rules/netwatch-ioc.rules"
+    volumes:
+      - ioc_rules:/rules
     depends_on:
       kafka:
         condition: service_healthy
-      neo4j:
+      settings_api:
+        condition: service_started
+    networks:
+      - processing-net
+      - frontend-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ── Credential Monitor (NEW) ──────────────────────────────────────────────────
+  credential_monitor:
+    build:
+      context: .
+      dockerfile: ./services/credential_monitor/Dockerfile
+    container_name: credential_monitor
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      SETTINGS_API_URL: "http://settings_api:5002"
+      INTERNAL_API_TOKEN: "${INTERNAL_API_TOKEN:-}"
+      HIBP_API_KEY: "${HIBP_API_KEY:-}"
+      CRED_CHECK_INTERVAL: "3600"
+    depends_on:
+      kafka:
         condition: service_healthy
+      settings_api:
+        condition: service_started
+    networks:
+      - processing-net
+      - frontend-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ── Sensors ───────────────────────────────────────────────────────────────────
+  asset_discovery:
+    build:
+      context: .
+      dockerfile: ./sensors/asset_discovery/Dockerfile
+    container_name: asset_discovery
+    restart: unless-stopped
+    environment:
+      NETWORK_RANGE: "${NETWORK_RANGE:-192.168.1.0/24}"
+      SCAN_INTERVAL_SECONDS: 300
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "asset.discovery"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - sensor-net
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  traffic_analysis:
+    build:
+      context: .
+      dockerfile: ./sensors/traffic_analysis/Dockerfile
+    container_name: traffic_analysis
+    restart: unless-stopped
+    environment:
+      INTERFACE: "${INTERFACE:-eth0}"
+      FLOW_WINDOW_SECONDS: 30
+      KAFKA_BOOTSTRAP: "localhost:29092"
+      KAFKA_TOPIC: "netflow"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    network_mode: "host"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  encrypted_traffic_analysis:
+    build:
+      context: .
+      dockerfile: ./sensors/encrypted_traffic_analysis/Dockerfile
+    container_name: encrypted_traffic_analysis
+    restart: unless-stopped
+    environment:
+      INTERFACE: "${INTERFACE:-eth0}"
+      KAFKA_BOOTSTRAP: "localhost:29092"
+      KAFKA_TOPIC: "tls.meta"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    network_mode: "host"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  suricata:
+    build:
+      context: .
+      dockerfile: ./sensors/suricata_custom/Dockerfile
+    container_name: suricata
+    restart: unless-stopped
+    network_mode: "host"
+    command: ["-c", "/etc/suricata/suricata.yaml", "-i", "${INTERFACE:-eth0}", "--init-errors-fatal"]
+    environment:
+      ET_PRO_API_KEY: "${ET_PRO_API_KEY:-}"
+    volumes:
+      - suricata_logs:/var/log/suricata
+      - ioc_rules:/etc/suricata/rules/custom:ro  # mount auto-generated IOC rules
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  ids_alert_forwarder:
+    build:
+      context: .
+      dockerfile: ./sensors/ids_alert_forwarder/Dockerfile
+    container_name: ids_alert_forwarder
+    restart: unless-stopped
+    environment:
+      EVE_FILE: "/var/log/suricata/eve.json"
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "security.alerts"
+    volumes:
+      - suricata_logs:/var/log/suricata:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      suricata:
+        condition: service_started
+    networks:
+      - sensor-net
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ── DNS Monitor with DGA detection + ephemeral tracer (NEW) ──────────────────
+  dns_monitor:
+    build:
+      context: .
+      dockerfile: ./sensors/dns_monitor/Dockerfile
+    container_name: dns_monitor
+    restart: unless-stopped
+    network_mode: "host"          # needs raw packet access
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      INTERFACE: "${INTERFACE:-eth0}"
+      KAFKA_BOOTSTRAP: "localhost:29092"
+      DGA_ENTROPY_THRESH: "3.6"
+      NXDOMAIN_BURST_LIMIT: "10"
+      NXDOMAIN_BURST_WINDOW: "60"
+      ENABLE_EPHEMERAL_TRACER: "${ENABLE_EPHEMERAL_TRACER:-false}"
+      TRACER_MAX_TTL: "20"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   zeek:
     image: blacktop/zeek:latest
     container_name: zeek
+    restart: unless-stopped
     network_mode: "host"
-    command: ["-i", "eth0", "-C", "LogAscii::use_json=T"]
+    command: ["-i", "${INTERFACE:-eth0}", "-C", "LogAscii::use_json=T"]
     volumes:
       - zeek_logs:/pcap
     environment:
       ZEEK_LOG_DIR: "/pcap"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   dpi_event_forwarder:
     build:
       context: .
       dockerfile: ./sensors/dpi_event_forwarder/Dockerfile
     container_name: dpi_event_forwarder
+    restart: unless-stopped
     volumes:
       - zeek_logs:/pcap:ro
     environment:
@@ -243,132 +534,43 @@ services:
         condition: service_healthy
       zeek:
         condition: service_started
-
-  geoip_enricher:
-    build:
-      context: .
-      dockerfile: ./services/geoip_enricher/Dockerfile
-    container_name: geoip_enricher
-    environment:
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      IN_TOPIC: "netflow"
-      OUT_TOPIC: "geo.events"
-      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows"
-      HTTP_PORT: 5000
-      HOME_LAT: "38.9"
-      HOME_LON: "-77.0"
-    volumes:
-      - ./GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  ui:
-    build:
-      context: .
-      dockerfile: ./ui/Dockerfile
-    container_name: ui
-    ports:
-      - "0.0.0.0:8080:80"
-    depends_on:
-      geoip_enricher:
-        condition: service_started
-
-  soar_blocker:
-    build:
-      context: .
-      dockerfile: ./services/soar_blocker/Dockerfile
-    container_name: soar_blocker
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      IDS_TOPIC: "security.alerts"
-      UEBA_TOPIC: "ueba.alerts"
-      SEVERITY_THRESHOLD: 2
-      ANOMALY_THRESHOLD: 0.5
-      BLOCKLIST_CMD: "echo 'iptables -A INPUT -s {ip} -j DROP'"
-      OLLAMA_URL: "http://host.docker.internal:11434"
-      OLLAMA_MODEL: "aratan/Ministral-3-14B-Reasoning-2512:latest"
-      LLM_BLOCK_ENABLED: "false"
-      LLM_BLOCK_CONFIDENCE: "0.8"
-      LLM_FALLBACK_BLOCK: "true"
-      CHECK_INTERVAL: "60"
-    depends_on:
-      kafka:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-
-  packet_launcher:
-    build:
-      context: .
-      dockerfile: ./services/packet_launcher/Dockerfile
-    container_name: packet_launcher
-    network_mode: "host"
-    environment:
-      ENABLE_PACKET_LAUNCHER: "${ENABLE_PACKET_LAUNCHER:-false}"
-      LAUNCH_TOKEN: "${LAUNCH_TOKEN:-}"
-      KAFKA_BOOTSTRAP: "localhost:29092"
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    ports:
-      - "7000:7000"
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  ai_analyst:
-    build:
-      context: .
-      dockerfile: ./services/ai_analyst/Dockerfile
-    container_name: ai_analyst
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "0.0.0.0:5001:5001"
-    environment:
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      OLLAMA_URL: "http://host.docker.internal:11434"
-      OLLAMA_MODEL: "aratan/Ministral-3-14B-Reasoning-2512:latest"
-      SECONDARY_MODEL: "cybersecserver/matrix-ai:latest"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "neo4j"
-      NEO4J_PASSWORD: "neo4jpassword"
-      ANALYSIS_TOPICS: "alert.correlated,security.alerts,dpi.events,voip.events"
-      BATCH_WINDOW_SECONDS: "30"
-      IMMEDIATE_SEVERITY: "2"
-      SUMMARY_INTERVAL_MINUTES: "60"
-    depends_on:
-      kafka:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      ollama:
-        condition: service_started
+    networks:
+      - sensor-net
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   voip_analysis:
     build:
       context: .
       dockerfile: ./sensors/voip_analysis/Dockerfile
     container_name: voip_analysis
+    restart: unless-stopped
     environment:
-      INTERFACE: "eth0"
+      INTERFACE: "${INTERFACE:-eth0}"
       KAFKA_BOOTSTRAP: "localhost:29092"
       KAFKA_TOPIC: "voip.events"
     network_mode: "host"
     depends_on:
       kafka:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   tshark_capture:
     build:
       context: .
       dockerfile: ./sensors/tshark_capture/Dockerfile
     container_name: tshark_capture
+    restart: unless-stopped
     environment:
-      INTERFACE: "eth0"
+      INTERFACE: "${INTERFACE:-eth0}"
       CAPTURE_DIR: "/captures"
       KAFKA_BOOTSTRAP: "localhost:29092"
       KAFKA_TOPIC: "voip.packets"
@@ -381,12 +583,190 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ── Processing services ───────────────────────────────────────────────────────
+  topology_updater:
+    build:
+      context: .
+      dockerfile: ./services/topology_updater/Dockerfile
+    container_name: topology_updater
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "asset.discovery"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-CHANGE_ME}"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    networks:
+      - processing-net
+      - storage-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  alert_sink_neo4j:
+    build:
+      context: .
+      dockerfile: ./services/alert_sink_neo4j/Dockerfile
+    container_name: alert_sink_neo4j
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      KAFKA_TOPIC: "alert.correlated"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-CHANGE_ME}"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    networks:
+      - processing-net
+      - storage-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  geoip_enricher:
+    build:
+      context: .
+      dockerfile: ./services/geoip_enricher/Dockerfile
+    container_name: geoip_enricher
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      IN_TOPIC: "netflow"
+      OUT_TOPIC: "geo.events"
+      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows"
+      HTTP_PORT: 5000
+      HOME_LAT: "${HOME_LAT:-38.9}"
+      HOME_LON: "${HOME_LON:--77.0}"
+    volumes:
+      - ./GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - processing-net
+      - frontend-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  ai_analyst:
+    build:
+      context: .
+      dockerfile: ./services/ai_analyst/Dockerfile
+    container_name: ai_analyst
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "0.0.0.0:5001:5001"
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-aratan/Ministral-3-14B-Reasoning-2512:latest}"
+      SECONDARY_MODEL: "${SECONDARY_MODEL:-cybersecserver/matrix-ai:latest}"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-CHANGE_ME}"
+      ANALYSIS_TOPICS: "alert.correlated,security.alerts,dpi.events,voip.events"
+      BATCH_WINDOW_SECONDS: "30"
+      IMMEDIATE_SEVERITY: "2"
+      SUMMARY_INTERVAL_MINUTES: "60"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - processing-net
+      - storage-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  soar_blocker:
+    build:
+      context: .
+      dockerfile: ./services/soar_blocker/Dockerfile
+    container_name: soar_blocker
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      IDS_TOPIC: "security.alerts"
+      UEBA_TOPIC: "ueba.alerts"
+      SEVERITY_THRESHOLD: "${SEVERITY_THRESHOLD:-2}"
+      ANOMALY_THRESHOLD: "0.5"
+      BLOCKLIST_CMD: "echo 'iptables -A INPUT -s {ip} -j DROP'"
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-aratan/Ministral-3-14B-Reasoning-2512:latest}"
+      LLM_BLOCK_ENABLED: "false"
+      LLM_BLOCK_CONFIDENCE: "0.8"
+      LLM_FALLBACK_BLOCK: "true"
+      CHECK_INTERVAL: "60"
+      MIN_ALERTS_TO_BLOCK: "${MIN_ALERTS_TO_BLOCK:-3}"
+      ALERT_WINDOW_SECONDS: "${ALERT_WINDOW_SECONDS:-60}"
+      BLOCK_TTL_SECONDS: "${BLOCK_TTL_SECONDS:-3600}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - processing-net
+      - storage-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   sarah_api:
     build:
       context: .
       dockerfile: ./services/sarah_api/Dockerfile
     container_name: sarah_api
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -394,8 +774,8 @@ services:
     environment:
       KAFKA_BOOTSTRAP: "kafka:9092"
       OLLAMA_URL: "http://host.docker.internal:11434"
-      OLLAMA_MODEL: "aratan/Ministral-3-14B-Reasoning-2512:latest"
-      OLLAMA_FALLBACK: "cybersecserver/matrix-ai:latest"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-aratan/Ministral-3-14B-Reasoning-2512:latest}"
+      OLLAMA_FALLBACK: "${SECONDARY_MODEL:-cybersecserver/matrix-ai:latest}"
       AI_ANALYST_URL: "http://ai_analyst:5001"
     depends_on:
       kafka:
@@ -404,10 +784,65 @@ services:
         condition: service_started
       ai_analyst:
         condition: service_started
+    networks:
+      - processing-net
+      - frontend-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
-volumes:
-  neo4j_data:
-  suricata_logs:
-  zeek_logs:
-  voip_captures:
-  ollama_data:
+  packet_launcher:
+    build:
+      context: .
+      dockerfile: ./services/packet_launcher/Dockerfile
+    container_name: packet_launcher
+    restart: on-failure
+    network_mode: "host"
+    environment:
+      ENABLE_PACKET_LAUNCHER: "${ENABLE_PACKET_LAUNCHER:-false}"
+      LAUNCH_TOKEN: "${LAUNCH_TOKEN:-}"
+      KAFKA_BOOTSTRAP: "localhost:29092"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  ui:
+    build:
+      context: .
+      dockerfile: ./ui/Dockerfile
+    container_name: ui
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8080:80"
+    depends_on:
+      geoip_enricher:
+        condition: service_started
+      settings_api:
+        condition: service_started
+      threat_intel:
+        condition: service_started
+      credential_monitor:
+        condition: service_started
+    networks:
+      - frontend-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M

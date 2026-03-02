@@ -5,4 +5,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/alert_sink_neo4j/alert_sink_neo4j.py .
 COPY common /app/common
 ENV PYTHONUNBUFFERED=1
+RUN useradd -m -u 1000 appuser
+USER appuser
+
 CMD ["python","alert_sink_neo4j.py"]

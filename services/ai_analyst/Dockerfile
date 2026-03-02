@@ -9,10 +9,8 @@ COPY common /app/common
 ENV PYTHONUNBUFFERED=1
 ENV KAFKA_BOOTSTRAP=kafka:9092
 ENV OLLAMA_URL=http://ollama:11434
-ENV OLLAMA_MODEL=qwen2.5:7b
 ENV NEO4J_URI=bolt://neo4j:7687
 ENV NEO4J_USER=neo4j
-ENV NEO4J_PASSWORD=neo4jpassword
 ENV ANALYSIS_TOPICS=alert.correlated,security.alerts,dpi.events,voip.events
 ENV BATCH_WINDOW_SECONDS=30
 ENV IMMEDIATE_SEVERITY=2
@@ -21,5 +19,8 @@ ENV HTTP_PORT=5001
 ENV SUMMARY_INTERVAL_MINUTES=60
 
 EXPOSE 5001
+
+RUN useradd -m -u 1000 appuser
+USER appuser
 
 CMD ["python", "ai_analyst.py"]
