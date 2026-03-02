@@ -2,6 +2,8 @@
 
 A modular, microservices-based network visibility and threat detection platform. Real-time traffic analysis, IDS alerting, deep packet inspection, AI-powered triage, external threat intelligence feeds, credential monitoring, DNS threat detection, and a live 3D globe dashboard — all running locally with Docker Compose.
 
+![Dashboard](ui/public/img/earth-night.jpg)
+
 > See [CHANGELOG.md](CHANGELOG.md) for the full v2.0 upgrade notes.
 
 ---
@@ -292,7 +294,7 @@ Copy `.env.template` → `.env` and fill in values. Key variables:
 | `asset_discovery` | `asset.discovery` | Active/passive network scanning |
 | `suricata` | → `eve.json` | IDS/IPS — ET rules + auto-generated IOC rules |
 | `ids_alert_forwarder` | `security.alerts` | Suricata EVE forwarder |
-| `encrypted_traffic_analysis` | `tls.meta` | JA3/SNI/TLS fingerprinting (captured; no downstream consumer yet — see feature status) |
+| `encrypted_traffic_analysis` | `tls.meta` | JA3/SNI/TLS fingerprinting; JA3 diversity anomalies wired to `security.alerts` via ksqlDB |
 | `zeek` | → logs | Deep packet inspection |
 | `dpi_event_forwarder` | `dpi.events` | Zeek log forwarder |
 | `voip_analysis` | `voip.events` | SIP/RTP session monitoring |
