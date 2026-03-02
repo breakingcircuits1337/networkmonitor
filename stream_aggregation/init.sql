@@ -106,3 +106,63 @@ CREATE STREAM IF NOT EXISTS credential_alerts (
   KAFKA_TOPIC='credential.alerts',
   VALUE_FORMAT='JSON'
 );
+-- ── TLS metadata stream (encrypted_traffic_analysis sensor) ──────────────────
+-- Fields: timestamp, direction (client|server), src_ip, dst_ip,
+--         ja3, ja3_hash, sni, ja3s, ja3s_hash
+CREATE STREAM IF NOT EXISTS tls_meta (
+  timestamp  VARCHAR,
+  direction  VARCHAR,
+  src_ip     VARCHAR,
+  dst_ip     VARCHAR,
+  ja3        VARCHAR,
+  ja3_hash   VARCHAR,
+  sni        VARCHAR,
+  ja3s       VARCHAR,
+  ja3s_hash  VARCHAR
+) WITH (
+  KAFKA_TOPIC='tls.meta',
+  VALUE_FORMAT='JSON'
+);
+
+-- Per-source-IP JA3 diversity table.
+-- A high count of distinct JA3 hashes from one IP suggests malware fingerprint
+-- rotation or a multi-tool attacker — useful for anomaly scoring.
+CREATE TABLE IF NOT EXISTS ja3_diversity_by_src AS
+  SELECT src_ip,
+         COUNT(*)                            AS handshake_count,
+         COUNT_DISTINCT(ja3_hash)            AS unique_ja3_count,
+         LATEST_BY_OFFSET(sni)               AS last_sni,
+         LATEST_BY_OFFSET(ja3_hash)          AS last_ja3_hash,
+         LATEST_BY_OFFSET(timestamp)         AS last_seen
+  FROM tls_meta
+  WHERE direction = 'client'
+    AND ja3_hash IS NOT NULL
+  GROUP BY src_ip
+  EMIT CHANGES;
+
+-- TLS anomaly alert stream — emits to security.alerts when a single source IP
+-- has produced more than 10 distinct JA3 fingerprints (threshold configurable
+-- via re-deployment; lower = more sensitive).
+-- These events flow through the standard alert pipeline:
+--   security.alerts → geoip_enricher (globe) → ai_analyst → soar_blocker
+CREATE STREAM IF NOT EXISTS tls_ja3_anomalies
+  WITH (KAFKA_TOPIC='security.alerts', VALUE_FORMAT='JSON') AS
+  SELECT src_ip,
+         src_ip                          AS dest_ip,
+         unique_ja3_count                AS anomaly_score,
+         last_sni                        AS sni,
+         last_ja3_hash                   AS ja3_hash,
+         STRUCT(
+           signature := 'TLS JA3 Diversity Anomaly — possible malware fingerprint rotation',
+           category  := 'tls-anomaly',
+           severity  := 2
+         )                               AS alert,
+         STRUCT(
+           source      := 'ksqldb-tls-anomaly',
+           ja3_count   := unique_ja3_count,
+           last_sni    := last_sni,
+           last_ja3    := last_ja3_hash
+         )                               AS metadata
+  FROM ja3_diversity_by_src
+  WHERE unique_ja3_count > 10
+  EMIT CHANGES;

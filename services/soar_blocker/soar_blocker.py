@@ -12,6 +12,52 @@ import requests
 from kafka import KafkaConsumer, KafkaProducer
 from common.config import get_env
 
+# ── GeoIP (optional — falls back gracefully if DB missing) ────────────────────
+try:
+    import geoip2.database as _geoip2_db
+    _GEOIP2_AVAILABLE = True
+except ImportError:
+    _GEOIP2_AVAILABLE = False
+
+_geoip_reader = None
+
+
+def _init_geoip(db_path: str):
+    global _geoip_reader
+    if not _GEOIP2_AVAILABLE:
+        logger.warning("geoip2 not installed — geo-blocking disabled")
+        return
+    try:
+        _geoip_reader = _geoip2_db.Reader(db_path)
+        logger.info(f"GeoIP database loaded: {db_path}")
+    except Exception as e:
+        logger.warning(f"GeoIP database unavailable ({e}) — geo-blocking disabled")
+
+
+def _get_country(ip: str) -> str:
+    """Return ISO-3166-1 alpha-2 country code for ip, or '' on failure."""
+    if not _geoip_reader:
+        return ""
+    try:
+        return _geoip_reader.city(ip).country.iso_code or ""
+    except Exception:
+        return ""
+
+
+def is_blocked_country(ip: str, blocked_countries: set) -> bool:
+    """Return True if ip's country is in the operator-configured block list."""
+    if not blocked_countries:
+        return False
+    country = _get_country(ip)
+    return bool(country and country.upper() in blocked_countries)
+
+
+def parse_blocked_countries(raw: str) -> set:
+    """Parse 'US,CN,RU' style env var into a normalised uppercase set."""
+    if not raw:
+        return set()
+    return {c.strip().upper() for c in raw.split(",") if c.strip()}
+
 # ── Redis persistence (optional — falls back to in-memory if unavailable) ─────
 # Redis persists the blocked-IP set and alert rate counters across container
 # restarts, eliminating the previous in-memory-only limitation.
@@ -537,6 +583,16 @@ def main():
     trusted_ips_str   = get_env("TRUSTED_IPS", "")
     trusted_ips, trusted_nets = build_trusted_set(trusted_ips_str)
 
+    # Geo-blocking — optional
+    blocked_countries_raw = get_env("BLOCKED_COUNTRIES", "")
+    blocked_countries     = parse_blocked_countries(blocked_countries_raw)
+    geoip_db_path         = get_env("GEOIP_DB", "/geoip/GeoLite2-City.mmdb")
+    if blocked_countries:
+        _init_geoip(geoip_db_path)
+        logger.info(f"Geo-blocking enabled for countries: {sorted(blocked_countries)}")
+    else:
+        logger.info("Geo-blocking disabled (BLOCKED_COUNTRIES not set)")
+
     # LLM config — disabled by default
     llm_enabled        = get_env("LLM_BLOCK_ENABLED",    "false").lower() == "true"
     ollama_url         = get_env("OLLAMA_URL",           "http://host.docker.internal:11434")
@@ -648,6 +704,34 @@ def main():
                 # --- Firewall Principle: Allowlisting (Trusted IPs) ---
                 if is_trusted_ip(src_ip, trusted_ips, trusted_nets):
                     logger.info(f"Allowlist: skipping trusted IP {src_ip}")
+                    continue
+
+                # --- Geo-blocking: block on first alert from a blocked country ---
+                if blocked_countries and is_blocked_country(src_ip, blocked_countries):
+                    country = _get_country(src_ip)
+                    if src_ip not in blocked:
+                        logger.info(f"Geo-block: {src_ip} is from {country} — blocking")
+                        success = execute_block(
+                            src_ip, blocklist_cmd, egress_cmd, unblock_cmd, block_ttl_sec,
+                        )
+                        if success:
+                            blocked.add(src_ip)
+                            mark_blocked_persistent(src_ip)
+                            try:
+                                producer.send(blocklist_topic, {
+                                    "ip": src_ip,
+                                    "severity": severity,
+                                    "anomaly_score": 0,
+                                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                                    "cmd": blocklist_cmd.format(ip=src_ip),
+                                    "block_ttl_sec": block_ttl_sec,
+                                    "egress_blocked": egress_cmd is not None,
+                                    "llm_enabled": False,
+                                    "geo_block": True,
+                                    "geo_country": country,
+                                })
+                            except Exception as e:
+                                logger.warning(f"Failed to publish geo-block action: {e}")
                     continue
 
                 score, _exp = anomaly_scores.get(src_ip, (1, now() + ttl_sec))

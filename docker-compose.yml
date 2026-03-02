@@ -652,7 +652,7 @@ services:
       KAFKA_BOOTSTRAP: "kafka:9092"
       IN_TOPIC: "netflow"
       OUT_TOPIC: "geo.events"
-      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows"
+      EXTRA_TOPICS: "security.alerts,dpi.events,voip.events,ai.analysis,blocklist.actions,raw.flows,tls.meta"
       HTTP_PORT: 5000
       HOME_LAT: "${HOME_LAT:-38.9}"
       HOME_LON: "${HOME_LON:--77.0}"
@@ -720,6 +720,32 @@ services:
           cpus: '1.0'
           memory: 2G
 
+
+  ueba_detector:
+    build:
+      context: .
+      dockerfile: ./services/ueba_detector/Dockerfile
+    container_name: ueba_detector
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      CONSUME_TOPICS: "netflow,security.alerts,dns.events"
+      UEBA_TOPIC: "ueba.alerts"
+      EMIT_INTERVAL_SECONDS: "${UEBA_EMIT_INTERVAL:-300}"
+      BASELINE_WINDOW_MINUTES: "${UEBA_BASELINE_MINUTES:-60}"
+      MIN_BASELINE_WINDOWS: "3"
+      EMIT_THRESHOLD: "${UEBA_EMIT_THRESHOLD:-0.6}"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - processing-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
   soar_blocker:
     build:
       context: .
@@ -745,6 +771,10 @@ services:
       ALERT_WINDOW_SECONDS: "${ALERT_WINDOW_SECONDS:-60}"
       BLOCK_TTL_SECONDS: "${BLOCK_TTL_SECONDS:-3600}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      BLOCKED_COUNTRIES: "${BLOCKED_COUNTRIES:-}"
+      GEOIP_DB: "/geoip/GeoLite2-City.mmdb"
+    volumes:
+      - ./GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
     depends_on:
       kafka:
         condition: service_healthy

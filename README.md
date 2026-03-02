@@ -25,9 +25,9 @@ A modular, microservices-based network visibility and threat detection platform.
 | **Graph Database** — Neo4j asset topology, alert correlation, AI analysis history | ✅ Complete |
 | **Stream Processing** — ksqlDB with persistent RocksDB state stores | ✅ Complete |
 | **Ephemeral Path Tracer** — active traceroute with randomised source IP/MAC (opt-in) | ✅ Complete (opt-in) |
-| **TLS Fingerprinting** — JA3/SNI capture via `encrypted_traffic_analysis` | 🟡 Captured, no downstream analysis yet |
-| **Geo-blocking** — auto-block IPs by country code | 🟡 `BLOCKED_COUNTRIES` env var defined, implementation pending |
-| **UEBA** — user and entity behaviour anomaly detection | 🟡 Framework wired (soar_blocker subscriber), detector service not yet built |
+| **TLS Fingerprinting** — JA3/SNI capture, JA3 diversity anomaly detection, alerts wired to globe + SOAR | ✅ Complete |
+| **Geo-blocking** — auto-block IPs by country code via `BLOCKED_COUNTRIES` env var | ✅ Complete |
+| **UEBA** — per-IP behavioural baseline + z-score anomaly scoring, feeds soar_blocker | ✅ Complete |
 | **Packet Launcher** — manual packet TX via REST | ✅ Opt-in (requires `ENABLE_PACKET_LAUNCHER=true`) |
 
 ---
