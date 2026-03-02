@@ -1244,6 +1244,12 @@ def summary():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    _PLACEHOLDER_VALUES = {"", "CHANGE_ME", "neo4jpassword"}
+    if NEO4J_PASSWORD in _PLACEHOLDER_VALUES:
+        raise SystemExit(
+            "FATAL: NEO4J_PASSWORD is not configured or still set to default. "
+            "Set NEO4J_PASSWORD in .env before starting."
+        )
     log.info("AI Analyst starting")
     log.info(f"  Primary model  (triage/JSON): {OLLAMA_MODEL}")
     log.info(f"  Secondary model (narratives): {SECONDARY_MODEL}")

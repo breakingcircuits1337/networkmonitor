@@ -5,9 +5,12 @@ import requests
 import time
 import threading
 from flask import Flask, request, jsonify, Response
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from kafka import KafkaConsumer
 
 app = Flask(__name__)
+limiter = Limiter(get_remote_address, app=app, default_limits=["120/hour"])
 
 KAFKA_BOOTSTRAP  = os.getenv('KAFKA_BOOTSTRAP',  'localhost:9092')
 OLLAMA_URL       = os.getenv('OLLAMA_URL',       'http://host.docker.internal:11434')
@@ -295,6 +298,7 @@ def get_response(message):
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/api/chat/stream", methods=["POST"])
+@limiter.limit("5/minute")
 def chat_stream():
     """Streaming chat — tokens SSE'd back as they generate."""
     data    = request.json
@@ -336,6 +340,7 @@ def chat_stream():
 
 
 @app.route("/api/chat", methods=["POST"])
+@limiter.limit("10/minute")
 def chat():
     data = request.json
     message = data.get("message", "")
@@ -388,6 +393,7 @@ def summary():
 
 
 @app.route("/api/triage", methods=["POST"])
+@limiter.limit("10/minute")
 def triage():
     """Triage a specific alert — returns structured JSON analysis."""
     alert = request.json

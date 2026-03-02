@@ -33,14 +33,66 @@ scrape_configs:
     static_configs:
       - targets: [kminion:8082]
 
-  # NetworkMonitor Python services that expose /metrics via prometheus_flask_exporter
-  - job_name: networkmonitor-services
+  # NetworkMonitor Python services — each with a per-service label for Grafana filtering
+  - job_name: networkmonitor-geoip-enricher
     scrape_interval: 15s
     metrics_path: /metrics
     static_configs:
-      - targets:
-          - geoip_enricher:5000
-          - ai_analyst:5001
-          - sarah_api:5000
+      - targets: [geoip_enricher:5000]
         labels:
+          service: geoip_enricher
+          project: networkmonitor
+
+  - job_name: networkmonitor-ai-analyst
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [ai_analyst:5001]
+        labels:
+          service: ai_analyst
+          project: networkmonitor
+
+  - job_name: networkmonitor-settings-api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [settings_api:5002]
+        labels:
+          service: settings_api
+          project: networkmonitor
+
+  - job_name: networkmonitor-threat-intel
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [threat_intel:5003]
+        labels:
+          service: threat_intel
+          project: networkmonitor
+
+  - job_name: networkmonitor-credential-monitor
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [credential_monitor:5004]
+        labels:
+          service: credential_monitor
+          project: networkmonitor
+
+  - job_name: networkmonitor-dns-monitor
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [dns_monitor:5005]
+        labels:
+          service: dns_monitor
+          project: networkmonitor
+
+  - job_name: networkmonitor-sarah-api
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [sarah_api:5000]
+        labels:
+          service: sarah_api
           project: networkmonitor

@@ -6,4 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/credential_monitor/credential_monitor.py .
 ENV PYTHONUNBUFFERED=1
 EXPOSE 5004
+RUN useradd -m -u 1000 appuser
+USER appuser
+
 CMD ["python", "credential_monitor.py"]

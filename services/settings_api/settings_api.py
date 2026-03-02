@@ -242,6 +242,12 @@ def health():
 
 
 if __name__ == "__main__":
+    _PLACEHOLDER_VALUES = {"", "CHANGE_ME", "CHANGE_ME_use_openssl_rand"}
+    if _RAW_KEY in _PLACEHOLDER_VALUES:
+        raise SystemExit(
+            "FATAL: SETTINGS_ENCRYPTION_KEY is not set or still placeholder. "
+            "Run: openssl rand -hex 32  and set it in .env before starting."
+        )
     log.info(f"Settings API — storage: {SETTINGS_FILE}")
-    log.info(f"Encryption key: {'env-configured' if _RAW_KEY else 'ephemeral random (set SETTINGS_ENCRYPTION_KEY!)'}")
+    log.info("Encryption key: env-configured")
     app.run(host="0.0.0.0", port=5002, debug=False, threaded=True)

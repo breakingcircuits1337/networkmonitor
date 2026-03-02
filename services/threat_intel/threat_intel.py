@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 import requests
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from kafka import KafkaProducer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -31,6 +33,7 @@ log = logging.getLogger("threat_intel")
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+limiter = Limiter(get_remote_address, app=app, default_limits=["200/hour"])
 
 # ── Config ────────────────────────────────────────────────────────────────────
 KAFKA_BOOTSTRAP  = os.getenv("KAFKA_BOOTSTRAP",  "kafka:9092")
@@ -304,7 +307,7 @@ def _fetch_misp():
             headers={"Authorization": key, "Accept": "application/json",
                      "Content-Type": "application/json"},
             json={"returnFormat": "json", "limit": 200, "type": ["ip-dst", "domain", "md5", "sha256"]},
-            timeout=20, verify=False,
+            timeout=20,
         )
         r.raise_for_status()
         attrs = r.json().get("response", {}).get("Attribute", [])
@@ -379,6 +382,7 @@ def _build_ioc_context() -> str:
 
 # ── Flask API ─────────────────────────────────────────────────────────────────
 @app.route("/api/intel-chat", methods=["POST"])
+@limiter.limit("5/minute")
 def intel_chat():
     """LLM analyst discussion of current IOC feed data."""
     data = request.json or {}
@@ -439,6 +443,7 @@ def ioc_rules_api():
 
 
 @app.route("/api/ioc/refresh", methods=["POST"])
+@limiter.limit("2/minute")
 def ioc_refresh():
     """Trigger an immediate feed refresh in background."""
     for fn, name in [(_fetch_otx, "OTX"), (_fetch_cisa_kev, "CISA-KEV"), (_fetch_misp, "MISP")]:

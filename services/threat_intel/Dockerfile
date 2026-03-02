@@ -9,4 +9,7 @@ RUN mkdir -p /rules
 ENV PYTHONUNBUFFERED=1 \
     SURICATA_CUSTOM_RULES=/rules/netwatch-ioc.rules
 EXPOSE 5003
+RUN useradd -m -u 1000 appuser && chown appuser /rules
+USER appuser
+
 CMD ["python", "threat_intel.py"]

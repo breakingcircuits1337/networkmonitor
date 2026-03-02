@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from kafka import KafkaProducer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -32,6 +34,7 @@ log = logging.getLogger("credential_monitor")
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+limiter = Limiter(get_remote_address, app=app, default_limits=["60/hour"])
 
 KAFKA_BOOTSTRAP  = os.getenv("KAFKA_BOOTSTRAP",  "kafka:9092")
 SETTINGS_API_URL = os.getenv("SETTINGS_API_URL", "http://settings_api:5002")
@@ -261,6 +264,7 @@ def cred_status():
 
 
 @app.route("/api/credentials/check-password", methods=["POST"])
+@limiter.limit("10/minute")
 def check_password():
     """k-anonymity password check — the actual password never leaves this service."""
     data = request.json or {}

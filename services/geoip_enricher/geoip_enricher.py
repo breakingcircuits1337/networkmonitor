@@ -92,6 +92,11 @@ def sse_stream():
 def events():
     return Response(sse_stream(), mimetype='text/event-stream')
 
+@app.route('/health')
+def health():
+    from flask import jsonify
+    return jsonify({"status": "ok", "sse_clients": len(_sse_clients)})
+
 def kafka_consumer_thread():
     kafka_bootstrap = get_env("KAFKA_BOOTSTRAP", "kafka:9092")
     in_topic = get_env("IN_TOPIC", "netflow")

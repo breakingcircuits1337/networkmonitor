@@ -142,3 +142,38 @@ groups:
           summary: "Available memory below 10% on {{ $labels.instance }}"
           description: >
             Host {{ $labels.instance }} has less than 10% memory available.
+
+  - name: sensor.data_silence
+    rules:
+
+      - alert: SensorFeedSilent
+        expr: |
+          (time() - max by (topic) (
+            kminion_kafka_topic_partition_high_water_mark{
+              topic=~"netflow|security\\.alerts|dns\\.events|dpi\\.events"
+            }
+          )) > 300
+        for: 5m
+        labels:
+          severity: critical
+          project: networkmonitor
+        annotations:
+          summary: "Sensor feed silent on topic {{ $labels.topic }}"
+          description: >
+            No new messages on topic {{ $labels.topic }} for more than 5 minutes.
+            The producing sensor may have crashed or lost network access.
+
+      - alert: ThreatIntelFeedStale
+        expr: |
+          (time() - max by (topic) (
+            kminion_kafka_topic_partition_high_water_mark{topic="ioc.feed"}
+          )) > 7200
+        for: 10m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "Threat intel IOC feed has not updated in 2+ hours"
+          description: >
+            No new IOCs published to ioc.feed for 2 hours.
+            Check that threat_intel service is running and has valid API keys.

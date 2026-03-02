@@ -7,4 +7,7 @@ RUN mkdir -p /data
 ENV PYTHONUNBUFFERED=1 \
     SETTINGS_FILE=/data/settings.enc
 EXPOSE 5002
+RUN useradd -m -u 1000 appuser && chown appuser /data
+USER appuser
+
 CMD ["python", "settings_api.py"]

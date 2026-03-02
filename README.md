@@ -8,21 +8,27 @@ A modular, microservices-based network visibility and threat detection platform.
 
 ## Features
 
-- **Live 3D Globe** — protocol-colored traffic arcs, geo-enriched alert markers, IOC/DNS/credential event markers
-- **Settings Page** — `⚙` button in navbar opens encrypted API key management (OTX, MISP, HIBP, ET Pro)
-- **Threat Intel Panel** — `🛡 INTEL` button opens live IOC feed + LLM analyst chat + auto-generated Suricata rules
-- **IDS Alerting** — Suricata with Emerging Threats rules + auto-generated IOC rules from live feeds
-- **Deep Packet Inspection** — Zeek DPI engine, session analytics, application-layer visibility
-- **DNS Threat Detection** — passive sniffer, DGA detection (Shannon entropy), NXDomain burst tracking, RPZ blocking
-- **Ephemeral Path Tracer** — active traceroute with randomised source IP/MAC to reveal true hop paths (opt-in)
-- **Credential Monitoring** — HaveIBeenPwned breach + paste monitoring, k-anonymity password check
-- **External IOC Feeds** — OTX AlienVault, CISA KEV, MISP; auto-converts IOCs to Suricata rules
-- **AI Analysis Engine** — 7-role sub-agent system with local Ollama LLMs
-- **AI Chat Assistants** — Sarah (network ops) + Threat Intel Analyst (IOC-grounded)
-- **SOAR Blocking** — Redis-persistent auto-IP-blocking with LLM gate option
-- **VoIP Monitoring** — SIP/RTP session tracking and anomaly detection
-- **Graph Database** — Neo4j asset topology, alert correlation, AI analysis history
-- **Stream Processing** — ksqlDB with persistent RocksDB state stores
+| Feature | Status |
+|---------|--------|
+| **Live 3D Globe** — protocol-colored traffic arcs, geo-enriched alert markers, IOC/DNS/credential event markers | ✅ Complete |
+| **Settings Page** — `⚙` button opens encrypted API key management (OTX, MISP, HIBP, ET Pro) | ✅ Complete |
+| **Threat Intel Panel** — live IOC feed + LLM analyst chat + auto-generated Suricata rules | ✅ Complete |
+| **IDS Alerting** — Suricata with Emerging Threats rules + auto-generated IOC rules from live feeds | ✅ Complete |
+| **Deep Packet Inspection** — Zeek DPI engine, session analytics, application-layer visibility | ✅ Complete |
+| **DNS Threat Detection** — passive sniffer, DGA detection (Shannon entropy), NXDomain burst tracking, RPZ blocking | ✅ Complete |
+| **Credential Monitoring** — HaveIBeenPwned breach + paste monitoring, k-anonymity password check | ✅ Complete |
+| **External IOC Feeds** — OTX AlienVault, CISA KEV, MISP; auto-converts IOCs to Suricata rules | ✅ Complete |
+| **AI Analysis Engine** — 7-role sub-agent system with local Ollama LLMs | ✅ Complete |
+| **AI Chat Assistants** — Sarah (network ops) + Threat Intel Analyst (IOC-grounded) | ✅ Complete |
+| **SOAR Blocking** — Redis-persistent auto-IP-blocking with LLM gate option | ✅ Complete |
+| **VoIP Monitoring** — SIP/RTP session tracking and anomaly detection | ✅ Complete |
+| **Graph Database** — Neo4j asset topology, alert correlation, AI analysis history | ✅ Complete |
+| **Stream Processing** — ksqlDB with persistent RocksDB state stores | ✅ Complete |
+| **Ephemeral Path Tracer** — active traceroute with randomised source IP/MAC (opt-in) | ✅ Complete (opt-in) |
+| **TLS Fingerprinting** — JA3/SNI capture via `encrypted_traffic_analysis` | 🟡 Captured, no downstream analysis yet |
+| **Geo-blocking** — auto-block IPs by country code | 🟡 `BLOCKED_COUNTRIES` env var defined, implementation pending |
+| **UEBA** — user and entity behaviour anomaly detection | 🟡 Framework wired (soar_blocker subscriber), detector service not yet built |
+| **Packet Launcher** — manual packet TX via REST | ✅ Opt-in (requires `ENABLE_PACKET_LAUNCHER=true`) |
 
 ---
 
@@ -93,10 +99,13 @@ ollama pull aratan/Ministral-3-14B-Reasoning-2512
 ```bash
 cp .env.template .env
 # Fill in .env — at minimum set:
-#   NEO4J_PASSWORD     (generate with: openssl rand -base64 24)
-#   SETTINGS_ENCRYPTION_KEY  (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-#   INTERNAL_API_TOKEN  (generate with: openssl rand -hex 32)
+#   NEO4J_PASSWORD           (generate: openssl rand -base64 24)
+#   SETTINGS_ENCRYPTION_KEY  (generate: openssl rand -hex 32)
+#   INTERNAL_API_TOKEN       (generate: openssl rand -hex 32)
 ```
+
+> **Note:** `settings_api` and `ai_analyst` will refuse to start if these are left as placeholders.
+> This is intentional — running with default credentials would expose your data.
 
 ### 3. Start the stack
 
@@ -208,6 +217,8 @@ Rules live in `monitoring/prometheus/rules/kafka-alerts.yml` and fire into Alert
 | `HostHighLoad` | Load avg > 1.5× CPU count for 10 min | warning |
 | `HostLowDiskSpace` | Root FS < 10% free for 5 min | critical |
 | `HostMemoryPressure` | Available RAM < 10% for 5 min | critical |
+| `SensorFeedSilent` | No new messages on `netflow`/`security.alerts`/`dns.events`/`dpi.events` for 5 min | critical |
+| `ThreatIntelFeedStale` | No new IOCs on `ioc.feed` for 2 hours | warning |
 
 By default alerts are logged by Alertmanager. To route them to **Slack or PagerDuty**, uncomment and fill in the receiver block in `monitoring/alertmanager/alertmanager.yml` — no restart needed, just reload:
 
@@ -281,7 +292,7 @@ Copy `.env.template` → `.env` and fill in values. Key variables:
 | `asset_discovery` | `asset.discovery` | Active/passive network scanning |
 | `suricata` | → `eve.json` | IDS/IPS — ET rules + auto-generated IOC rules |
 | `ids_alert_forwarder` | `security.alerts` | Suricata EVE forwarder |
-| `encrypted_traffic_analysis` | `tls.meta` | JA3/SNI/TLS fingerprinting |
+| `encrypted_traffic_analysis` | `tls.meta` | JA3/SNI/TLS fingerprinting (captured; no downstream consumer yet — see feature status) |
 | `zeek` | → logs | Deep packet inspection |
 | `dpi_event_forwarder` | `dpi.events` | Zeek log forwarder |
 | `voip_analysis` | `voip.events` | SIP/RTP session monitoring |
@@ -379,6 +390,15 @@ An opt-in REST endpoint for manual packet transmission (ICMP/TCP/UDP).
 ## GeoIP Setup
 
 Download the free [MaxMind GeoLite2-City](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) database and place `GeoLite2-City.mmdb` in the repository root before starting.
+
+```bash
+# Quick download with a MaxMind license key (free tier):
+MAXMIND_LICENSE_KEY=your_key_here
+curl -sL "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz" \
+  | tar -xz --strip-components=1 --wildcards "*/GeoLite2-City.mmdb" -C .
+```
+
+> If the file is missing the globe will not display geo data but the rest of the stack will still start.
 
 ---
 
