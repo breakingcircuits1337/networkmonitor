@@ -66,7 +66,7 @@ def main():
     kafka_topic = get_env("KAFKA_TOPIC", "alert.correlated")
     neo4j_uri = get_env("NEO4J_URI", "bolt://neo4j:7687")
     neo4j_user = get_env("NEO4J_USER", "neo4j")
-    neo4j_password = get_env("NEO4J_PASSWORD", "neo4jpassword")
+    neo4j_password = get_env("NEO4J_PASSWORD", "CHANGE_ME")
     group_id = "neo4j-alert-sink"
 
     logger.info(f"Starting Alert Sink Neo4j Service")

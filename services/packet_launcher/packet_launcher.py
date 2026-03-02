@@ -76,8 +76,12 @@ def launch():
         # Basic validations
         if proto not in ("ICMP", "UDP", "TCP"):
             return jsonify({"error": "Protocol must be ICMP, UDP, or TCP"}), 400
-        if not ip or len(ip) > 50:
+        if not ip:
             return jsonify({"error": "Invalid IP"}), 400
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({"error": "Invalid IP address format"}), 400
         if not (1 <= size <= 1500):
             return jsonify({"error": "Packet size must be 1-1500 bytes"}), 400
         if not (1 <= rate <= 100):

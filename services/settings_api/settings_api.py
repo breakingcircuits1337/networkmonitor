@@ -16,6 +16,7 @@ Security design:
 """
 
 import base64
+import hmac
 import ipaddress
 import json
 import logging
@@ -97,7 +98,7 @@ def _check_internal_token():
     if not expected:
         return jsonify({"error": "Unauthorized"}), 401
     token = request.headers.get("X-Internal-Token", "")
-    if token != expected:
+    if not hmac.compare_digest(token, expected):
         return jsonify({"error": "Unauthorized"}), 401
     return None
 

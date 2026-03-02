@@ -194,73 +194,14 @@ services:
           cpus: '4.0'
           memory: 16G
 
-  asset_discovery:
-    build:
-      context: .
-      dockerfile: ./sensors/asset_discovery/Dockerfile
-    container_name: asset_discovery
-    environment:
-      NETWORK_RANGE: "192.168.1.0/24"
-      SCAN_INTERVAL_SECONDS: 300
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "asset.discovery"
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  topology_updater:
-    build:
-      context: .
-      dockerfile: ./services/topology_updater/Dockerfile
-    container_name: topology_updater
-    environment:
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "asset.discovery"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "neo4j"
-      NEO4J_PASSWORD: "neo4jpassword"
-    depends_on:
-      kafka:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-
-  traffic_analysis:
-    build:
-      context: .
-      dockerfile: ./sensors/traffic_analysis/Dockerfile
-    container_name: traffic_analysis
-    environment:
-      INTERFACE: "eth0"
-      FLOW_WINDOW_SECONDS: 30
-      KAFKA_BOOTSTRAP: "localhost:29092"
-      KAFKA_TOPIC: "netflow"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    network_mode: "host"
-
-  encrypted_traffic_analysis:
-    build:
-      context: .
-      dockerfile: ./sensors/encrypted_traffic_analysis/Dockerfile
-    container_name: encrypted_traffic_analysis
-    environment:
-      INTERFACE: "eth0"
-      KAFKA_BOOTSTRAP: "localhost:29092"
-      KAFKA_TOPIC: "tls.meta"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    network_mode: "host"
-
   passive_fingerprint:
     build:
       context: .
       dockerfile: ./sensors/passive_fingerprint/Dockerfile
     container_name: passive_fingerprint
+    restart: unless-stopped
     environment:
-      INTERFACE: "eth0"
+      INTERFACE: "${INTERFACE:-eth0}"
       KAFKA_BOOTSTRAP: "localhost:29092"
       KAFKA_TOPIC: "fingerprint.events"
     depends_on:
@@ -270,35 +211,11 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
-
-  suricata:
-    build:
-      context: .
-      dockerfile: ./sensors/suricata_custom/Dockerfile
-    container_name: suricata
-    network_mode: "host"
-    command: ["-c", "/etc/suricata/suricata.yaml", "-i", "eth0", "--init-errors-fatal"]
-    environment:
-      ET_PRO_API_KEY: ${ET_PRO_API_KEY:-}
-    volumes:
-      - suricata_logs:/var/log/suricata
-
-  ids_alert_forwarder:
-    build:
-      context: .
-      dockerfile: ./sensors/ids_alert_forwarder/Dockerfile
-    container_name: ids_alert_forwarder
-    environment:
-      EVE_FILE: "/var/log/suricata/eve.json"
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "security.alerts"
-    volumes:
-      - suricata_logs:/var/log/suricata:ro
-    depends_on:
-      kafka:
-        condition: service_healthy
-      suricata:
-        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   # ── Stream processing ─────────────────────────────────────────────────────────
   ksqldb-server:

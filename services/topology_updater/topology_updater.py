@@ -51,7 +51,7 @@ def main():
 
     neo4j_uri = get_env("NEO4J_URI", "bolt://neo4j:7687")
     neo4j_user = get_env("NEO4J_USER", "neo4j")
-    neo4j_password = get_env("NEO4J_PASSWORD", "neo4jpassword")
+    neo4j_password = get_env("NEO4J_PASSWORD", "CHANGE_ME")
 
     logger.info(f"Starting Topology Updater Service")
     logger.info(f"Config: KAFKA_BOOTSTRAP={kafka_bootstrap} KAFKA_TOPIC={kafka_topic} NEO4J_URI={neo4j_uri}")

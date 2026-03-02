@@ -229,8 +229,8 @@ def process_pkt(pkt):
                             "dst_ip":     ip.dst,
                             **indicators,
                         })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"HTTP proxy header parse error: {e}")
 
     # 4 ── DNS EDNS(0) fingerprinting ──────────────────────────────────────────
     if pkt.haslayer(DNS) and pkt.haslayer(UDP):
@@ -254,8 +254,8 @@ def process_pkt(pkt):
                         "edns_payload_size": rr.rclass,
                         "edns_do_bit":       bool((rr.ttl >> 15) & 1),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"DNS EDNS parse error: {e}")
 
 
 def main():

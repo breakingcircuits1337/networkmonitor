@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import logging
 import os
 import json
 import requests
@@ -8,6 +9,9 @@ from flask import Flask, request, jsonify, Response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from kafka import KafkaConsumer
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("sarah_api")
 
 app = Flask(__name__)
 limiter = Limiter(get_remote_address, app=app, default_limits=["120/hour"])
@@ -67,7 +71,7 @@ def _cache_worker():
                     if len(cache) > CACHE_MAX:
                         cache.pop(0)
         except Exception as e:
-            print(f"Cache worker error: {e}")
+            log.warning(f"Cache worker error: {e}")
             time.sleep(5)
 
 
@@ -98,7 +102,7 @@ def get_threat_summary() -> dict:
             _summary_cache["ts"] = now
             return data
     except Exception as e:
-        print(f"[sarah_api] ai_analyst unreachable: {e}")
+        log.warning(f"ai_analyst unreachable: {e}")
     return {}
 
 
@@ -165,7 +169,7 @@ def _ollama_generate(model, payload, timeout=120):
         if resp.status_code == 200:
             return resp.json().get("response", "").strip()
     except Exception as e:
-        print(f"Ollama [{model}] error: {e}")
+        log.warning(f"Ollama [{model}] error: {e}")
     return None
 
 
@@ -197,7 +201,7 @@ def _ollama_stream(model, full_prompt, timeout=90):
                 except Exception:
                     continue
     except Exception as e:
-        print(f"Ollama stream [{model}] error: {e}")
+        log.warning(f"Ollama stream [{model}] error: {e}")
 
 
 def query_ollama(prompt, context=""):
@@ -214,7 +218,7 @@ def query_ollama(prompt, context=""):
     if result:
         return result, OLLAMA_MODEL
 
-    print(f"Primary model failed, trying fallback: {OLLAMA_FALLBACK}")
+    log.warning(f"Primary model failed, trying fallback: {OLLAMA_FALLBACK}")
     result = _ollama_generate(OLLAMA_FALLBACK, payload, timeout=60)
     if result:
         return result, OLLAMA_FALLBACK
@@ -233,7 +237,7 @@ def query_ollama_json(prompt):
         if raw:
             return json.loads(raw)
     except Exception as e:
-        print(f"Ollama JSON error: {e}")
+        log.warning(f"Ollama JSON error: {e}")
     return None
 
 
@@ -464,6 +468,5 @@ def health():
 if __name__ == "__main__":
     t = threading.Thread(target=_cache_worker, daemon=True)
     t.start()
-    print(f"Sarah API starting...")
-    print(f"Ollama: {OLLAMA_URL} ({OLLAMA_MODEL})")
+    log.info(f"Sarah API starting — Ollama: {OLLAMA_URL} ({OLLAMA_MODEL})")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

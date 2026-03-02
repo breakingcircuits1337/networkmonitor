@@ -4,7 +4,7 @@ import signal
 import json
 import logging
 from datetime import datetime
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 
 from scapy.all import sniff, IP, TCP, UDP
 from kafka import KafkaProducer
@@ -19,7 +19,7 @@ logger = logging.getLogger("traffic_analysis")
 
 # Flow key: (src_ip, dst_ip, src_port, dst_port, protocol)
 flows = {}
-flows_lock = Event()  # Not a lock, just an exit event
+flows_lock = Lock()
 shutdown_event = Event()
 
 def isoformat(ts):
@@ -47,27 +47,29 @@ def packet_handler(pkt):
     key = (src_ip, dst_ip, src_port, dst_port, proto)
     pkt_len = len(pkt)
     now = time.time()
-    f = flows.get(key)
-    if f:
-        f["packets"] += 1
-        f["bytes"] += pkt_len
-        f["last_seen"] = now
-    else:
-        flows[key] = {
-            "src_ip": src_ip,
-            "dst_ip": dst_ip,
-            "src_port": src_port,
-            "dst_port": dst_port,
-            "protocol": proto,
-            "bytes": pkt_len,
-            "packets": 1,
-            "first_seen": now,
-            "last_seen": now,
-        }
+    with flows_lock:
+        f = flows.get(key)
+        if f:
+            f["packets"] += 1
+            f["bytes"] += pkt_len
+            f["last_seen"] = now
+        else:
+            flows[key] = {
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": proto,
+                "bytes": pkt_len,
+                "packets": 1,
+                "first_seen": now,
+                "last_seen": now,
+            }
 
 def flush_flows(producer, topic):
     global flows
-    snapshot, flows = flows, {}
+    with flows_lock:
+        snapshot, flows = flows, {}
     count = 0
     for flow in snapshot.values():
         record = {
