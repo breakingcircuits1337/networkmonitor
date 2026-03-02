@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -95,7 +96,8 @@ def _get_monitored_emails() -> list[str]:
     raw = _get_setting("monitored_emails", "MONITORED_EMAILS")
     if not raw:
         return []
-    return [e.strip().lower() for e in raw.split(",") if "@" in e.strip()]
+    _email_re = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+    return [e.strip().lower() for e in raw.split(",") if _email_re.match(e.strip())]
 
 
 # ── HIBP helpers ──────────────────────────────────────────────────────────────
@@ -239,7 +241,7 @@ def _monitor_loop():
     while True:
         try:
             _check_all_emails()
-        except Exception as e:
+        except (requests.exceptions.RequestException, OSError) as e:
             log.error(f"Monitor loop error: {e}")
         time.sleep(CHECK_INTERVAL)
 

@@ -226,7 +226,7 @@ def test_connection(service):
         try:
             r = req.get(f"{url}/servers/getVersion",
                         headers={"Authorization": key, "Accept": "application/json"},
-                        timeout=8, verify=False)
+                        timeout=8)
             if r.status_code == 200:
                 return jsonify({"ok": True, "version": r.json().get("version", "?")})
             return jsonify({"ok": False, "error": f"HTTP {r.status_code}"})
