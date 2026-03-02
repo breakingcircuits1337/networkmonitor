@@ -1,0 +1,163 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "title": "Kafka Consumer Lag — NetworkMonitor",
+  "uid": "nm-kafka-consumer-lag",
+  "refresh": "30s",
+  "schemaVersion": 36,
+  "tags": ["kafka", "networkmonitor"],
+  "templating": {
+    "list": [
+      {
+        "name": "consumer_group",
+        "label": "Consumer Group",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(kminion_kafka_consumer_group_topic_partition_lag, group)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2
+      },
+      {
+        "name": "topic",
+        "label": "Topic",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(kminion_kafka_consumer_group_topic_partition_lag{group=~\"$consumer_group\"}, topic)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Lag by Consumer Group",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (group) (kminion_kafka_consumer_group_topic_partition_lag{group=~\"$consumer_group\", topic=~\"$topic\"})",
+          "legendFormat": "{{group}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "red", "value": 50000 }
+            ]
+          },
+          "unit": "short",
+          "displayName": "Lag"
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Lag Growth Rate (messages/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "deriv(sum by (group) (kminion_kafka_consumer_group_topic_partition_lag{group=~\"$consumer_group\", topic=~\"$topic\"})[5m])",
+          "legendFormat": "{{group}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "displayName": "Rate"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Lag per Partition",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kminion_kafka_consumer_group_topic_partition_lag{group=~\"$consumer_group\", topic=~\"$topic\"}",
+          "instant": true,
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields" },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [{ "displayName": "Value", "desc": true }]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Topic High-Water Marks",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (topic) (kminion_kafka_topic_partition_high_water_mark{topic=~\"$topic\"})",
+          "legendFormat": "{{topic}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "displayName": "Offset" }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Broker Log Dir Size",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kminion_kafka_broker_log_dir_size_total_bytes",
+          "legendFormat": "broker {{broker_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "displayName": "Size" }
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {}
+}

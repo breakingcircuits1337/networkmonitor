@@ -124,6 +124,80 @@ Open `http://localhost:8080`, click **⚙** in the top bar, then add your:
 
 ---
 
+## Observability & Monitoring Stack
+
+The monitoring stack is an optional Docker Compose overlay that adds Prometheus metrics collection, Grafana dashboards, Alertmanager routing, KMinion Kafka lag tracking, node-exporter (host metrics), and cAdvisor (container metrics).
+
+### Start the monitoring stack
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+```
+
+### Access
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Prometheus | http://localhost:9090 | Metrics store + PromQL query UI |
+| Grafana | http://localhost:3000 | Dashboards (admin / `GRAFANA_PASSWORD`) |
+| Alertmanager | http://localhost:9093 | Alert routing |
+| KMinion | http://localhost:8082/metrics | Kafka lag + broker metrics |
+| node-exporter | http://localhost:9100/metrics | Host CPU/memory/disk metrics |
+| cAdvisor | http://localhost:8083/metrics | Per-container resource metrics |
+
+### Pre-provisioned dashboards
+
+| Dashboard | Description |
+|-----------|-------------|
+| **Kafka Consumer Lag** | Per-group/topic/partition lag, lag growth rate, high-water marks |
+| **Docker Container Overview** | CPU, memory, network per container, uptime check |
+
+To import additional community dashboards visit [grafana.com/grafana/dashboards](https://grafana.com/grafana/dashboards) and use IDs:
+- **14013** — KMinion Topics
+- **18136** — Kafka Consumer Offsets
+- **11963** — Kafka Lag
+
+### Alerting rules
+
+Prometheus alerting rules are in `monitoring/prometheus/rules/kafka-alerts.yml` and cover:
+
+- `KafkaConsumerLagWarning` — lag > 5,000 messages for 5 min
+- `KafkaConsumerLagCritical` — lag > 50,000 messages for 5 min
+- `KafkaConsumerLagGrowing` — lag steadily increasing
+- `ContainerDown` — container not seen for > 30 s
+- `ContainerHighMemory` — > 85% memory limit for 5 min
+- `ContainerHighCPU` — > 80% CPU for 10 min
+- `HostHighLoad`, `HostLowDiskSpace`, `HostMemoryPressure`
+
+To add Slack/PagerDuty notifications, edit `monitoring/alertmanager/alertmanager.yml` and set `GRAFANA_PASSWORD` in `.env`.
+
+### Force Prometheus to reload rules without restart
+
+```bash
+curl -X POST http://localhost:9090/-/reload
+```
+
+### Monitoring directory layout
+
+```
+monitoring/
+├── prometheus/
+│   ├── prometheus.yml          # Scrape config (Kafka, containers, host, services)
+│   └── rules/
+│       └── kafka-alerts.yml    # Alerting rules
+├── alertmanager/
+│   └── alertmanager.yml        # Alert routing (add Slack/PD here)
+└── grafana/
+    ├── provisioning/
+    │   ├── datasources/prometheus.yml
+    │   └── dashboards/default.yml
+    └── dashboards/
+        ├── kafka-consumer-lag.json
+        └── docker-overview.json
+```
+
+---
+
 ## Configuration
 
 Copy `.env.template` → `.env` and fill in values. Key variables:

@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: networkmonitor
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  - job_name: node-exporter
+    scrape_interval: 10s
+    static_configs:
+      - targets: [node-exporter:9100]
+
+  - job_name: cadvisor
+    scrape_interval: 10s
+    static_configs:
+      - targets: [cadvisor:8080]
+
+  - job_name: kminion
+    scrape_interval: 30s
+    static_configs:
+      - targets: [kminion:8082]
+
+  # NetworkMonitor Python services that expose /metrics via prometheus_flask_exporter
+  - job_name: networkmonitor-services
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - geoip_enricher:5000
+          - ai_analyst:5001
+          - sarah_api:5000
+        labels:
+          project: networkmonitor

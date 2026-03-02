@@ -1,0 +1,144 @@
+groups:
+  - name: kafka.consumer_lag
+    interval: 30s
+    rules:
+
+      - alert: KafkaConsumerLagWarning
+        expr: |
+          sum by (group, topic) (
+            kminion_kafka_consumer_group_topic_partition_lag{
+              group!~"^_.*"
+            }
+          ) > 5000
+        for: 5m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "Kafka consumer lag is elevated"
+          description: >
+            Consumer group {{ $labels.group }} has a total lag of {{ $value | humanize }}
+            messages on topic {{ $labels.topic }}.
+
+      - alert: KafkaConsumerLagCritical
+        expr: |
+          sum by (group, topic) (
+            kminion_kafka_consumer_group_topic_partition_lag{
+              group!~"^_.*"
+            }
+          ) > 50000
+        for: 5m
+        labels:
+          severity: critical
+          project: networkmonitor
+        annotations:
+          summary: "Kafka consumer lag is critical"
+          description: >
+            Consumer group {{ $labels.group }} is {{ $value | humanize }} messages behind
+            on topic {{ $labels.topic }}. Data processing is severely delayed.
+
+      - alert: KafkaConsumerLagGrowing
+        expr: |
+          deriv(
+            sum by (group, topic) (
+              kminion_kafka_consumer_group_topic_partition_lag
+            )[10m]
+          ) > 100
+        for: 15m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "Kafka consumer lag is growing"
+          description: >
+            Consumer group {{ $labels.group }} lag is increasing on topic {{ $labels.topic }}.
+            Consumer may be stopped or too slow.
+
+  - name: docker.container_health
+    rules:
+
+      - alert: ContainerDown
+        expr: |
+          absent(container_last_seen{
+            name=~".+",
+            name!~"^(cadvisor|prometheus|grafana|node-exporter|alertmanager|kminion)$"
+          }) == 1
+        for: 30s
+        labels:
+          severity: critical
+          project: networkmonitor
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+          description: >
+            Container {{ $labels.name }} has not been seen for more than 30 seconds.
+
+      - alert: ContainerHighMemory
+        expr: |
+          (
+            container_memory_working_set_bytes{name=~".+"}
+            /
+            container_spec_memory_limit_bytes{name=~".+"}
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "Container {{ $labels.name }} memory usage is high"
+          description: >
+            Container {{ $labels.name }} is using {{ $value | humanizePercentage }}
+            of its memory limit.
+
+      - alert: ContainerHighCPU
+        expr: |
+          sum by (name) (
+            rate(container_cpu_usage_seconds_total{name=~".+"}[5m])
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "Container {{ $labels.name }} CPU usage is high"
+          description: >
+            Container {{ $labels.name }} is using {{ $value | humanizePercentage }} CPU cores.
+
+  - name: host.node_health
+    rules:
+
+      - alert: HostHighLoad
+        expr: node_load1 > (count by (instance) (node_cpu_seconds_total{mode="idle"})) * 1.5
+        for: 10m
+        labels:
+          severity: warning
+          project: networkmonitor
+        annotations:
+          summary: "High system load on {{ $labels.instance }}"
+          description: >
+            System load average (1m) has exceeded 1.5x the CPU count for 10 minutes.
+
+      - alert: HostLowDiskSpace
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/"} /
+          node_filesystem_size_bytes{mountpoint="/"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          project: networkmonitor
+        annotations:
+          summary: "Disk space below 10% on {{ $labels.instance }}"
+          description: >
+            Root filesystem has less than 10% space available on {{ $labels.instance }}.
+
+      - alert: HostMemoryPressure
+        expr: |
+          node_memory_MemAvailable_bytes /
+          node_memory_MemTotal_bytes < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          project: networkmonitor
+        annotations:
+          summary: "Available memory below 10% on {{ $labels.instance }}"
+          description: >
+            Host {{ $labels.instance }} has less than 10% memory available.

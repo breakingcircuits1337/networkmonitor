@@ -1,0 +1,29 @@
+logger:
+  level: info
+
+kafka:
+  brokers:
+    - kafka:9092
+  clientId: kminion
+
+minion:
+  consumerGroups:
+    enabled: true
+    scrapeMode: adminApi
+    granularity: partition
+    allowedGroupIdRegex: ".*"
+    ignoredGroupIdRegex: "^_.*"
+  topics:
+    enabled: true
+    granularity: partition
+    allowedTopicNameRegex: ".*"
+    ignoredTopicNameRegex: "^__.*"
+  logDirs:
+    enabled: true
+  endToEnd:
+    enabled: false
+
+exporter:
+  host: "0.0.0.0"
+  port: 8082
+  namespace: kminion
