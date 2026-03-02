@@ -58,6 +58,7 @@ MIN_BASELINE_WINDOWS     = int(os.getenv("MIN_BASELINE_WINDOWS",    "3"))     # 
 EMIT_THRESHOLD           = float(os.getenv("EMIT_THRESHOLD",        "0.6"))  # 0-1
 ZSCORE_CAP               = float(os.getenv("ZSCORE_CAP",            "10.0")) # cap raw z-score
 CONSUMER_GROUP           = os.getenv("KAFKA_CONSUMER_GROUP",   "ueba-detector")
+MAX_TRACKED_IPS          = int(os.getenv("MAX_TRACKED_IPS",        "10000")) # DoS guard
 
 # ── State ─────────────────────────────────────────────────────────────────────
 # Current accumulator for the active window (reset every EMIT_INTERVAL_SECONDS)
@@ -70,7 +71,10 @@ _current: dict = defaultdict(lambda: {
 
 # Historical baselines: { ip: deque([{"bytes_sent": x, ...}, ...]) }
 # Each deque entry is a completed window snapshot (raw values, not sets).
-_history: dict = defaultdict(lambda: deque(maxlen=max(MIN_BASELINE_WINDOWS * 4, 24)))
+# Retain enough windows to cover BASELINE_WINDOW_MINUTES of history.
+_HISTORY_MAXLEN = max(MIN_BASELINE_WINDOWS + 1,
+                      BASELINE_WINDOW_MINUTES * 60 // EMIT_INTERVAL_SECONDS)
+_history: dict = defaultdict(lambda: deque(maxlen=_HISTORY_MAXLEN))
 
 _state_lock = threading.Lock()
 _shutdown   = threading.Event()
@@ -263,6 +267,13 @@ def _process_window(producer: KafkaProducer):
         f"Window processed: {len(snapshot)} IPs evaluated, "
         f"{emitted} anomalies emitted (score >= {EMIT_THRESHOLD})"
     )
+
+    # Prune stale IPs to keep _history bounded (DoS guard: MAX_TRACKED_IPS)
+    if len(_history) > MAX_TRACKED_IPS:
+        stale = [ip for ip in list(_history) if ip not in snapshot]
+        to_drop = len(_history) - MAX_TRACKED_IPS
+        for ip in stale[:to_drop]:
+            del _history[ip]
 
 
 # ── Graceful shutdown ─────────────────────────────────────────────────────────
