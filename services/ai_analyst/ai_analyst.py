@@ -1244,7 +1244,7 @@ def summary():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    _PLACEHOLDER_VALUES = {"", "CHANGE_ME", "neo4jpassword"}
+    _PLACEHOLDER_VALUES = {"", "CHANGE_ME", "neo4jpassword", "CHANGE_ME_use_openssl_rand"}
     if NEO4J_PASSWORD in _PLACEHOLDER_VALUES:
         raise SystemExit(
             "FATAL: NEO4J_PASSWORD is not configured or still set to default. "

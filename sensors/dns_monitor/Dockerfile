@@ -8,5 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     INTERFACE=eth0 \
     DGA_ENTROPY_THRESH=3.6 \
     ENABLE_EPHEMERAL_TRACER=false
+RUN useradd -m -u 1000 appuser
+USER appuser
 EXPOSE 5005
 CMD ["python", "dns_monitor.py"]

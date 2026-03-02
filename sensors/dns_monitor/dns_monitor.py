@@ -25,6 +25,7 @@ import math
 import os
 import random
 import re
+import signal
 import socket
 import struct
 import threading
@@ -63,6 +64,8 @@ _rpz_blocklist: set = set()                   # domain blocklist (loaded from en
 
 _sse_clients: list = []
 _sse_lock = threading.Lock()
+
+_shutdown_event = threading.Event()
 
 # ── Kafka ──────────────────────────────────────────────────────────────────────
 _producer: KafkaProducer | None = None
@@ -293,7 +296,7 @@ def _sniff_dns():
         log.error(f"DNS sniffer socket error: {e}")
         return
 
-    while True:
+    while not _shutdown_event.is_set():
         try:
             raw, addr = sock.recvfrom(65535)
             if len(raw) < 42:
@@ -570,5 +573,17 @@ if __name__ == "__main__":
     log.info(f"DGA entropy threshold: {DGA_ENTROPY_THRESH}  |  NXDomain burst: {NXDOMAIN_BURST_LIMIT}/{NXDOMAIN_BURST_WINDOW}s")
     log.info(f"Ephemeral tracer: {'ENABLED' if ENABLE_TRACER else 'disabled'}")
     _load_rpz()
-    threading.Thread(target=_sniff_dns, daemon=True, name="dns-sniffer").start()
+
+    _sniffer = threading.Thread(target=_sniff_dns, daemon=False, name="dns-sniffer")
+    _sniffer.start()
+
+    def _on_shutdown(sig, frame):
+        log.info("Shutdown signal received — stopping sniffer")
+        _shutdown_event.set()
+        _sniffer.join(timeout=5)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _on_shutdown)
+    signal.signal(signal.SIGINT, _on_shutdown)
+
     app.run(host="0.0.0.0", port=5005, debug=False, threaded=True)
