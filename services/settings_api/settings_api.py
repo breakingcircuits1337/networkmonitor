@@ -88,6 +88,17 @@ def _redact(key: str, val: str) -> str:
     return val
 
 
+def _check_internal_token():
+    """Return a 401 response tuple if X-Internal-Token is missing/wrong, else None."""
+    expected = os.getenv("INTERNAL_API_TOKEN", "")
+    if not expected:
+        return None  # token enforcement disabled (dev mode)
+    token = request.headers.get("X-Internal-Token", "")
+    if token != expected:
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
 # ── Encrypted store ───────────────────────────────────────────────────────────
 def _load() -> dict:
     with _lock:
@@ -122,6 +133,9 @@ def get_settings():
 @app.route("/api/settings", methods=["POST"])
 def update_settings():
     """Upsert one or more settings. JSON body: {key: value, ...}"""
+    err = _check_internal_token()
+    if err:
+        return err
     body = request.json
     if not isinstance(body, dict):
         return jsonify({"error": "JSON object required"}), 400
@@ -155,10 +169,9 @@ def update_settings():
 @app.route("/api/settings/<path:key>", methods=["GET"])
 def get_one(key):
     """Internal endpoint — returns plaintext value. Requires X-Internal-Token."""
-    token = request.headers.get("X-Internal-Token", "")
-    expected = os.getenv("INTERNAL_API_TOKEN", "")
-    if expected and token != expected:
-        return jsonify({"error": "Unauthorized"}), 401
+    err = _check_internal_token()
+    if err:
+        return err
 
     k = _clean_key(key)
     if not k:
@@ -172,6 +185,9 @@ def get_one(key):
 @app.route("/api/settings", methods=["DELETE"])
 def delete_settings():
     """Delete one or more keys. Body: {keys: ["key1", "key2"]}"""
+    err = _check_internal_token()
+    if err:
+        return err
     body = request.json or {}
     keys = body.get("keys", [])
     data = _load()
@@ -189,6 +205,9 @@ def delete_settings():
 @app.route("/api/settings/test/<service>", methods=["POST"])
 def test_connection(service):
     """Test connectivity for a configured external service."""
+    err = _check_internal_token()
+    if err:
+        return err
     import requests as req
     data = _load()
 
@@ -223,6 +242,8 @@ def test_connection(service):
         key = data.get("misp_api_key", "")
         if not url or not key:
             return jsonify({"ok": False, "error": "MISP URL and API key required"})
+        if not _URL_RE.match(url):
+            return jsonify({"ok": False, "error": "Stored MISP URL is invalid"}), 400
         try:
             r = req.get(f"{url}/servers/getVersion",
                         headers={"Authorization": key, "Accept": "application/json"},

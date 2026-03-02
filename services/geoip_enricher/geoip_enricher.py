@@ -142,12 +142,20 @@ def kafka_consumer_thread():
         return "LAN", home_lat, home_lon
 
     def _resolve_coords(src_ip):
-        """GeoIP lookup with RFC1918 fallback to home coords."""
+        """GeoIP lookup with RFC1918 / bogon fallback to home coords.
+
+        Covers all special-purpose ranges that will never appear in the
+        GeoLite2 database: private, loopback, link-local, multicast,
+        reserved blocks, and the unspecified address.  Without this, those
+        IPs silently drop events instead of pinning to the home sensor.
+        """
         country, lat, lon = geoip_lookup(src_ip, reader) if src_ip else (None, None, None)
         if (lat is None or lon is None) and src_ip:
             try:
                 addr = ipaddress.ip_address(src_ip)
-                if addr.is_private or addr.is_loopback:
+                if (addr.is_private or addr.is_loopback or addr.is_link_local
+                        or addr.is_multicast or addr.is_reserved
+                        or addr.is_unspecified):
                     return _home_coords()
             except Exception:
                 pass
@@ -187,6 +195,8 @@ def kafka_consumer_thread():
                     event_type = ev.get("event_type", "dns_event")
                 elif topic == "credential.alerts":
                     event_type = ev.get("alert_type", "credential_alert")
+                elif topic == "fingerprint.events":
+                    event_type = "fingerprint"
                 else:
                     event_type = "other"
 
@@ -281,6 +291,21 @@ def kafka_consumer_thread():
                     # Pin credential alerts to home coords
                     country, lat, lon = _home_coords()
 
+                elif event_type == "fingerprint":
+                    src_ip    = ev.get("src_ip", "")
+                    dst_ip    = ev.get("dst_ip", "")
+                    timestamp = ev.get("timestamp") or now_str
+                    geo_event["dst_ip"] = dst_ip
+                    for field in ("fp_subtype", "os_guess", "os_confidence",
+                                  "ttl", "init_ttl", "window", "df",
+                                  "mss", "window_scale", "tcp_options",
+                                  "ssh_banner", "via", "x_forwarded_for",
+                                  "x_real_ip", "user_agent",
+                                  "query", "edns_payload_size", "edns_do_bit"):
+                        if field in ev:
+                            geo_event[field] = ev[field]
+                    geo_event["fp_subtype"] = ev.get("event_type", "os_fingerprint")
+
                 geo_event.update({
                     "src_ip":    src_ip,
                     "dst_ip":    dst_ip,
@@ -291,8 +316,8 @@ def kafka_consumer_thread():
                 country, lat, lon = _resolve_coords(src_ip)
 
                 # Pin non-flow events with unresolvable coords to home base
-                # (VoIP/AI analysis from LAN IPs have no public GeoIP entry)
-                if (lat is None or lon is None) and event_type != "flow":
+                # (VoIP/AI analysis/fingerprint events from LAN IPs have no public GeoIP entry)
+                if (lat is None or lon is None) and event_type not in ("flow", "raw_flow"):
                     country, lat, lon = _home_coords()
 
                 geo_event["country"] = country
@@ -303,7 +328,7 @@ def kafka_consumer_thread():
                     continue  # drop flows with no coords (can't place on globe)
 
                 # Publish geo-enriched event to geo.events (flows/alerts/DPI only)
-                if event_type not in ("ai_analysis", "voip"):
+                if event_type not in ("ai_analysis", "voip", "fingerprint"):
                     producer.send(out_topic, geo_event)
 
                 _push_sse(geo_event)

@@ -87,6 +87,7 @@ export default function App() {
   const [dpiEvents,  setDpiEvents]  = useState([]);
   const [voipEvents, setVoipEvents] = useState([]);
   const [aiEvents,   setAiEvents]   = useState([]);
+  const [fpEvents,   setFpEvents]   = useState([]);
 
   const [showFlows, setShowFlows] = useState(true);
   const [showIds,   setShowIds]   = useState(true);
@@ -94,16 +95,18 @@ export default function App() {
   const [showVoip,  setShowVoip]  = useState(true);
   const [showAi,    setShowAi]    = useState(true);
   const [showArcs,  setShowArcs]  = useState(true);
+  const [showFp,    setShowFp]    = useState(true);
 
   const [windowSec,   setWindowSec]   = useState(DEFAULT_WINDOW);
   const [timelinePos, setTimelinePos] = useState(nowSec());
   const [play,        setPlay]        = useState(false);
   const [connected,   setConnected]   = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roles,       setRoles]       = useState([]);
-  const [viewMode,    setViewMode]    = useState("globe"); // "globe" or "map"
+  const [sidebarOpen,    setSidebarOpen]    = useState(false);
+  const [roles,          setRoles]          = useState([]);
+  const [viewMode,       setViewMode]       = useState("globe"); // "globe" or "map"
   const [settingsOpen,    setSettingsOpen]    = useState(false);
   const [threatIntelOpen, setThreatIntelOpen] = useState(false);
+  const [selectedPoint,  setSelectedPoint]  = useState(null);
 
   // IOC / DNS / Credential events routed to globe as alert points
   const [iocEvents,  setIocEvents]  = useState([]);
@@ -174,6 +177,8 @@ export default function App() {
       push(setDnsEvents, MAX_ALERTS);
     } else if (topic === "credential.alerts" || eventType === "email_breach" || eventType === "paste_exposure") {
       push(setCredEvents, MAX_ALERTS);
+    } else if (topic === "fingerprint.events") {
+      push(setFpEvents, MAX_ALERTS);
     }
 
     setTimelinePos(curr => Math.max(curr, ts));
@@ -221,6 +226,8 @@ export default function App() {
   const filteredIoc    = onGlobe(iocEvents);
   const filteredDns    = onGlobe(dnsEvents);
   const filteredCred   = onGlobe(credEvents);
+  // OS fingerprint events — only show os_fingerprint sub-type on globe (SSH/DNS too noisy)
+  const filteredFp     = onGlobe(fpEvents).filter(e => e.fp_subtype === "os_fingerprint");
   const aiCritical     = filteredAi.filter(
     a => a.severity === "critical" || a.severity === "high"
   ).length;
@@ -249,12 +256,12 @@ export default function App() {
     if (showDpi)  filteredDpi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#7c51a1",                              _r: 0.28 }));
     if (showVoip) filteredVoip.forEach(p => pts.push({ ...p, lng: toLng(p), _col: "#00BCD4",                              _r: 0.32 }));
     if (showAi)   filteredAi.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: AI_SEV_COLOR[p.severity] || "#9E9E9E",  _r: 0.42 }));
-    // New layers
     filteredIoc.forEach(p   => pts.push({ ...p, lng: toLng(p), _col: "#FF6F00", _r: 0.35 }));
     filteredDns.forEach(p   => pts.push({ ...p, lng: toLng(p), _col: p.is_dga ? "#e53935" : "#00e676", _r: 0.30 }));
     filteredCred.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#7b0000", _r: 0.45 }));
+    if (showFp)   filteredFp.forEach(p  => pts.push({ ...p, lng: toLng(p), _col: "#FFC107",                              _r: 0.22 }));
     return pts;
-  }, [filteredIds, filteredDpi, filteredVoip, filteredAi, showIds, showDpi, showVoip, showAi]); // eslint-disable-line
+  }, [filteredIds, filteredDpi, filteredVoip, filteredAi, filteredFp, filteredIoc, filteredDns, filteredCred, showIds, showDpi, showVoip, showAi, showFp]); // eslint-disable-line
 
   // Arcs — IDS alerts (red) + raw flows (protocol color)
   const arcs = useMemo(() => {
@@ -348,7 +355,14 @@ export default function App() {
         pointAltitude={0.015}
         pointLabel={pointLabel}
         onPointClick={p => {
-          if (p.src_ip) window.open(assetLink(p.src_ip), "_blank");
+          setSelectedPoint(p);
+          if (globeRef.current) {
+            globeRef.current.pointOfView(
+              { lat: p.lat, lng: toLng(p), altitude: 0.4 },
+              1200
+            );
+            globeRef.current.controls().autoRotate = false;
+          }
         }}
 
         // ── Arcs layer — IDS attack paths ─────────────────────────────────────
@@ -536,6 +550,7 @@ export default function App() {
         showVoip={showVoip}    setShowVoip={setShowVoip}
         showAi={showAi}        setShowAi={setShowAi}
         showArcs={showArcs}    setShowArcs={setShowArcs}
+        showFp={showFp}        setShowFp={setShowFp}
         play={play}            setPlay={setPlay}
         minTs={minTs}          maxTs={maxTs}
         timelinePos={timelinePos} setTimelinePos={setTimelinePos}
@@ -545,6 +560,7 @@ export default function App() {
         filteredDpi={filteredDpi}
         filteredVoip={filteredVoip}
         filteredAi={filteredAi}
+        filteredFp={filteredFp}
         aiCritical={aiCritical}
         globeRef={globeRef}
         roles={roles}
@@ -558,6 +574,17 @@ export default function App() {
 
       {/* ── AI Chat widget ───────────────────────────────────────────────── */}
       <SarahChatWidget darkMode={true} />
+
+      {/* ── Threat detail modal (globe click) ────────────────────────────── */}
+      {selectedPoint && (
+        <ThreatModal
+          point={selectedPoint}
+          onClose={() => {
+            setSelectedPoint(null);
+            if (globeRef.current) globeRef.current.controls().autoRotate = true;
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -582,9 +609,10 @@ function GlobeSidebar({
   showFlows, setShowFlows, showIds, setShowIds,
   showDpi, setShowDpi, showVoip, setShowVoip,
   showAi, setShowAi, showArcs, setShowArcs,
+  showFp, setShowFp,
   play, setPlay, minTs, maxTs, timelinePos, setTimelinePos,
   windowSec, setWindowSec,
-  filteredFlows, filteredIds, filteredDpi, filteredVoip, filteredAi, aiCritical,
+  filteredFlows, filteredIds, filteredDpi, filteredVoip, filteredAi, filteredFp, aiCritical,
   globeRef, roles,
 }) {
   return (
@@ -620,6 +648,7 @@ function GlobeSidebar({
             [showVoip,  setShowVoip,  "#00BCD4", "VoIP"],
             [showAi,    setShowAi,    "#FF6F00", "AI Analysis"],
             [showArcs,  setShowArcs,  "#e53935", "Attack Arcs"],
+            [showFp,    setShowFp,    "#FFC107", "OS Fingerprints"],
           ].map(([val, setter, col, label]) => (
             <label key={label} style={{
               display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
@@ -653,6 +682,7 @@ function GlobeSidebar({
             ["VOIP",    filteredVoip.length,  "#00BCD4"],
             ["AI",      filteredAi.length,    "#FF6F00"],
             ["HI/CRIT", aiCritical,           aiCritical > 0 ? "#e53935" : "rgba(0,229,255,0.25)"],
+            ["OS FP",   filteredFp.length,    filteredFp.length > 0 ? "#FFC107" : "rgba(0,229,255,0.25)"],
           ].map(([label, count, col]) => (
             <div key={label} style={{
               background: "rgba(0,229,255,0.03)",
@@ -748,6 +778,12 @@ function GlobeSidebar({
 
         <Divider />
 
+        {/* ── IP Trace ── */}
+        <SectionLabel style={{ color: "#00e676" }}>// IP TRACE</SectionLabel>
+        <IpTraceForm />
+
+        <Divider />
+
         {/* ── Sub-agent roles ── */}
         <SectionLabel>// AI SUB-AGENTS</SectionLabel>
         {roles.length === 0 ? (
@@ -820,6 +856,7 @@ function GlobeSidebar({
             ["#e53935", "AI-high / DGA"],
             ["#7b0000", "AI-crit / breach"],
             ["#00e676", "DNS-clean"],
+            ["#FFC107", "OS-fp"],
           ].map(([col, label]) => (
             <span key={label} style={{ color: "rgba(0,229,255,0.6)" }}>
               <span style={{ color: col }}>●</span> {label}
@@ -928,5 +965,249 @@ function PacketLauncherForm() {
         </div>
       )}
     </form>
+  );
+}
+
+// ─── IP Trace Form ────────────────────────────────────────────────────────────
+function IpTraceForm() {
+  const [ip,     setIp]     = useState("");
+  const [maxTtl, setMaxTtl] = useState(30);
+  const [hops,   setHops]   = useState(null);
+  const [error,  setError]  = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleTrace(e) {
+    e.preventDefault();
+    setHops(null); setError(""); setLoading(true);
+    try {
+      const res = await fetch("/trace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip, max_ttl: +maxTtl, timeout: 1 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Error");
+      } else {
+        setHops(data.hops || []);
+      }
+    } catch {
+      setError("Network error.");
+    } finally { setLoading(false); }
+  }
+
+  const inp = {
+    background: "rgba(0,229,255,0.04)", color: "#e8e8e8",
+    border: "1px solid rgba(0,229,255,0.2)", borderRadius: 4,
+    padding: "4px 7px", fontSize: 12, fontFamily: "monospace",
+    outline: "none",
+  };
+
+  return (
+    <form onSubmit={handleTrace} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", gap: 5 }}>
+        <input type="text" value={ip} onChange={e => setIp(e.target.value)}
+          placeholder="Target IP" required style={{ ...inp, flex: 1 }} />
+        <input type="number" value={maxTtl} onChange={e => setMaxTtl(e.target.value)}
+          placeholder="Max TTL" min={1} max={64} style={{ ...inp, width: 66 }} />
+      </div>
+      <button type="submit" disabled={loading} style={{
+        background: loading
+          ? "rgba(0,230,118,0.15)"
+          : "rgba(0,230,118,0.5)",
+        color: "#fff",
+        border: "1px solid rgba(0,230,118,0.4)",
+        borderRadius: 5, padding: "7px 0",
+        cursor: loading ? "wait" : "pointer",
+        fontFamily: "'Share Tech Mono', monospace",
+        fontSize: 11, letterSpacing: 2,
+        transition: "background 0.2s",
+      }}>
+        {loading ? "TRACING…" : "TRACE"}
+      </button>
+      {error && (
+        <div style={{
+          fontFamily: "monospace", fontSize: 11,
+          padding: "5px 8px", borderRadius: 4,
+          background: "rgba(229,57,53,0.12)", color: "#e53935",
+          border: "1px solid rgba(229,57,53,0.3)",
+        }}>
+          {error}
+        </div>
+      )}
+      {hops && hops.length > 0 && (
+        <div style={{
+          fontFamily: "monospace", fontSize: 11,
+          background: "rgba(0,230,118,0.05)",
+          border: "1px solid rgba(0,230,118,0.2)",
+          borderRadius: 4, padding: "6px 8px",
+          maxHeight: 180, overflowY: "auto",
+          display: "flex", flexDirection: "column", gap: 2,
+        }}>
+          {hops.map(h => (
+            <div key={h.hop} style={{ display: "flex", gap: 8, color: h.ip === "*" ? "rgba(0,230,118,0.35)" : "#00e676" }}>
+              <span style={{ width: 20, textAlign: "right", flexShrink: 0 }}>{h.hop}</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {h.ip}
+              </span>
+              <span style={{ flexShrink: 0, color: "rgba(0,230,118,0.6)" }}>
+                {h.rtt_ms !== null ? `${h.rtt_ms}ms` : "* * *"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </form>
+  );
+}
+
+// ─── Threat Detail Modal (click-to-zoom + Street View) ───────────────────────
+function ThreatModal({ point, onClose }) {
+  const lat = point.lat;
+  const lng = toLng(point);
+  const col   = point._col || "#00e5ff";
+  const topic = (point.topic || point.event_type || "EVENT").toUpperCase();
+
+  // Google Maps satellite embed — no API key required for the classic embed URL
+  const mapsEmbedUrl =
+    `https://maps.google.com/maps?q=${lat},${lng}&z=16&t=k&output=embed`;
+
+  // Google Maps street-level URL that opens Street View mode
+  const streetViewUrl =
+    `https://www.google.com/maps/@${lat},${lng},3a,75y,0h,90t/data=!3m1!1e1`;
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 3000,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(5px)",
+      }}
+    >
+      <div style={{
+        background: "rgba(0,8,20,0.97)",
+        border: `1px solid ${col}44`,
+        borderRadius: 10,
+        width: 540, maxWidth: "95vw",
+        maxHeight: "88vh",
+        display: "flex", flexDirection: "column",
+        boxShadow: `0 0 48px ${col}22, 0 0 120px rgba(0,0,0,0.8)`,
+        overflow: "hidden",
+      }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          borderBottom: `1px solid ${col}22`,
+          flexShrink: 0,
+        }}>
+          <span style={{
+            fontFamily: "'Share Tech Mono', monospace",
+            color: col, fontSize: 12, letterSpacing: 2,
+            textShadow: `0 0 8px ${col}66`,
+          }}>
+            ⚠ {topic} · {point.src_ip || `${lat.toFixed(3)},${lng.toFixed(3)}`}
+          </span>
+          <button onClick={onClose} style={{
+            background: "none", border: "none",
+            color: "rgba(255,255,255,0.45)", cursor: "pointer",
+            fontSize: 18, padding: "0 4px", lineHeight: 1,
+          }}>✕</button>
+        </div>
+
+        {/* ── Intel fields ── */}
+        <div style={{
+          padding: "10px 16px",
+          fontFamily: "monospace", fontSize: 11, color: "#ccc",
+          display: "flex", flexWrap: "wrap", gap: "3px 18px",
+          flexShrink: 0,
+          borderBottom: `1px solid ${col}11`,
+        }}>
+          {point.src_ip     && <span><b style={{ color: col }}>src </b>{point.src_ip}{point.src_port ? `:${point.src_port}` : ""}</span>}
+          {point.dst_ip     && <span><b style={{ color: col }}>dst </b>{point.dst_ip}</span>}
+          {point.signature  && <span style={{ width: "100%" }}><b style={{ color: col }}>sig </b>{point.signature}</span>}
+          {point.severity !== undefined && <span><b style={{ color: col }}>sev </b>{point.severity}</span>}
+          {point.country    && <span><b style={{ color: col }}>cc  </b>{point.country}</span>}
+          {point.summary    && <span style={{ width: "100%" }}><b style={{ color: col }}>ai  </b>{point.summary}</span>}
+
+          {/* ── Passive fingerprint fields ── */}
+          {point.os_guess   && (
+            <span style={{ width: "100%" }}>
+              <b style={{ color: col }}>os  </b>
+              {point.os_guess}
+              {point.os_confidence != null && (
+                <span style={{ opacity: 0.5 }}> (conf {point.os_confidence})</span>
+              )}
+            </span>
+          )}
+          {point.ttl        && <span><b style={{ color: col }}>ttl </b>{point.ttl} <span style={{ opacity: 0.5 }}>(init≈{point.init_ttl})</span></span>}
+          {point.window     && <span><b style={{ color: col }}>win </b>{point.window}</span>}
+          {point.mss        && <span><b style={{ color: col }}>mss </b>{point.mss}</span>}
+          {point.df != null && <span><b style={{ color: col }}>df  </b>{point.df ? "1" : "0"}</span>}
+          {point.ssh_banner && <span style={{ width: "100%" }}><b style={{ color: col }}>ssh </b>{point.ssh_banner}</span>}
+          {point.via        && <span style={{ width: "100%" }}><b style={{ color: "#FF6F00" }}>via </b>{point.via}</span>}
+          {point.x_forwarded_for && <span style={{ width: "100%" }}><b style={{ color: "#FF6F00" }}>x-fwd </b>{point.x_forwarded_for}</span>}
+          {point.user_agent && <span style={{ width: "100%" }}><b style={{ color: col }}>ua  </b>{point.user_agent}</span>}
+
+          <span><b style={{ color: col }}>geo </b>{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+          {point._ts        && <span style={{ opacity: 0.45 }}>{fmtTime(point._ts)}</span>}
+        </div>
+
+        {/* ── Embedded satellite map ── */}
+        <div style={{ flex: 1, minHeight: 260, position: "relative", background: "#111" }}>
+          <iframe
+            title="threat-location-map"
+            src={mapsEmbedUrl}
+            width="100%"
+            height="100%"
+            style={{ border: "none", display: "block" }}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+
+        {/* ── Footer actions ── */}
+        <div style={{
+          display: "flex", gap: 8, padding: "10px 16px",
+          borderTop: `1px solid ${col}22`,
+          flexShrink: 0,
+        }}>
+          <a
+            href={streetViewUrl}
+            target="_blank" rel="noreferrer"
+            style={{
+              flex: 1, textAlign: "center", padding: "7px 0",
+              background: "rgba(66,133,244,0.15)",
+              border: "1px solid rgba(66,133,244,0.4)",
+              borderRadius: 5, color: "#4285f4",
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: 11, letterSpacing: 1, textDecoration: "none",
+            }}
+          >
+            STREET VIEW ↗
+          </a>
+          {point.src_ip && (
+            <a
+              href={assetLink(point.src_ip)}
+              target="_blank" rel="noreferrer"
+              style={{
+                flex: 1, textAlign: "center", padding: "7px 0",
+                background: "rgba(0,229,255,0.08)",
+                border: "1px solid rgba(0,229,255,0.3)",
+                borderRadius: 5, color: "#00e5ff",
+                fontFamily: "'Share Tech Mono', monospace",
+                fontSize: 11, letterSpacing: 1, textDecoration: "none",
+              }}
+            >
+              NEO4J ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
